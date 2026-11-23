@@ -13,3 +13,14 @@ __pycache__/
 
 # Dataset
 data/
+
+# Artefactos y resultados generados
+artifacts/
+models/
+results/
+reports/
+
+# Herramientas de desarrollo
+.pytest_cache/
+.coverage
+htmlcov/

@@ -1,0 +1,88 @@
+{
+  "detector_config": {
+    "sampling_interval_sec": 1.0,
+    "baseline_window_sec": 60,
+    "z_score_threshold": 3.0,
+    "recovery_consecutive_sec": 4,
+    "max_anomaly_window_sec": 120
+  },
+  "services": [
+    {
+      "name": "ts-order-service",
+      "role": "core",
+      "upstream": [
+        "ts-preserve-service",
+        "ts-cancel-service"
+      ],
+      "downstream": [
+        "ts-order-other-service",
+        "ts-inside-payment-service"
+      ],
+      "metrics": {
+        "cpu_usage_pct": {
+          "alert_on_spike": true,
+          "weight": 1.0
+        },
+        "memory_rss_mb": {
+          "alert_on_spike": true,
+          "weight": 0.8
+        },
+        "latency_p99_ms": {
+          "alert_on_spike": true,
+          "weight": 1.2
+        },
+        "http_5xx_rate": {
+          "alert_on_spike": true,
+          "weight": 1.2
+        },
+        "network_receive_bytes_per_sec": {
+          "alert_on_spike": true,
+          "weight": 1.0
+        },
+        "open_sockets_count": {
+          "alert_on_spike": true,
+          "weight": 1.0
+        }
+      }
+    },
+    {
+      "name": "ts-auth-service",
+      "role": "auth",
+      "upstream": [
+        "ts-gateway-service"
+      ],
+      "downstream": [
+        "ts-verification-code-service"
+      ],
+      "metrics": {
+        "cpu_usage_pct": {
+          "alert_on_spike": true,
+          "weight": 1.0
+        },
+        "memory_rss_mb": {
+          "alert_on_spike": true,
+          "weight": 0.8
+        },
+        "latency_p99_ms": {
+          "alert_on_spike": true,
+          "weight": 1.2
+        },
+        "http_5xx_rate": {
+          "alert_on_spike": true,
+          "weight": 1.2
+        },
+        "network_receive_bytes_per_sec": {
+          "alert_on_spike": true,
+          "weight": 1.0
+        },
+        "open_sockets_count": {
+          "alert_on_spike": true,
+          "weight": 1.0
+        }
+      }
+    }
+  ],
+  "schema_version": 1,
+  "is_example": true,
+  "allow_external_service_references": true
+}
