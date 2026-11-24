@@ -66,6 +66,7 @@ los archivos `requirements*.txt` sí deben versionarse. No se necesita un archiv
 
 ```text
 config/topology.json           Topología y parámetros de ejemplo
+src/configuration.py           Lectura y validación de la configuración JSON
 src/ingestion.py               Adaptación de datos y timestamps
 src/window_detector.py         Ventanas NORMAL/ANÓMALA y baseline sano
 src/feature_builder.py         Features locales y relativas por servicio
@@ -79,12 +80,37 @@ tests/                         Contratos de pruebas pendientes
 
 ## Configuración y datos
 
-`config/topology.json` es un ejemplo parcial. Incluye familias de CPU, memoria,
-latencia, errores y red/sockets. `allow_external_service_references` expresa
-que se permiten referencias a servicios fuera de la lista; su validación está
-pendiente. `upstream` representa llamadores y `downstream` los servicios llamados.
+`config/topology.json` contiene el inventario de columnas observado en los 90
+casos locales de RE2-SS (Sock Shop). Incluye CPU, memoria, latencia, errores,
+sockets, disco y carga. Conserva los nombres originales sin convertir unidades,
+que todavía están pendientes de verificar. Las métricas no presentes en todos
+los casos figuran en `optional_metrics`; las comunes, en `required_metrics`.
+Las columnas se identifican con el patrón `{service}_{metric}` y su ausencia
+no significa valor cero. `metric_families` agrupa los sufijos por familia.
+
+`upstream` y `downstream` son `null`: las dependencias no están verificadas,
+lo que no equivale a afirmar que no existen. El inventario incluye todos los
+componentes observados y no restringe candidatos a los servicios con fallos
+inyectados.
 
 El detector contempla resolución objetivo de 1 segundo, baseline de 60 segundos,
 umbral Z-score de 3, recuperación de 4 segundos consecutivos y máximo de ventana
 anómala de 120 segundos.
-Los campos `alert_on_spike` y `weight` son propuestas sin lógica ejecutable.
+Estos parámetros son iniciales y todavía no están calibrados. `TopologyConfig`
+valida el JSON y permite conectar su configuración con `RCAEvalLoader`:
+
+```python
+from src.configuration import TopologyConfig
+from src.ingestion import RCAEvalLoader
+
+config = TopologyConfig("config/topology.json")
+loader = RCAEvalLoader(configuration=config)
+incident_id = loader.list_incidents()[0]
+metadata = loader.load_metadata(incident_id)
+metrics = loader.load_metrics(incident_id)
+```
+
+Las rutas relativas de datos se resuelven desde el directorio padre de `config/`.
+La carga configurada rechaza columnas desconocidas y requeridas ausentes;
+conserva las opcionales ausentes sin crearlas ni rellenarlas. El punto de
+entrada `run_pipeline.py` sigue siendo provisional: no ejecuta detección ni ML.
