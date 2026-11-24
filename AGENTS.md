@@ -90,6 +90,34 @@ añade herramientas de desarrollo. `time` no requiere instalación.
 
 ## Estado al crear este contexto
 
+Actualización: se inspeccionaron los 90 casos locales de RE2-SS en
+`data/raw/RCAEval`. Cada uno contiene 1441 timestamps separados por 1 s y
+720 muestras anteriores a la inyección. Hay faltantes y entre 74 y 82 métricas.
+`src/ingestion.py` define `IncidentMetadata`, `MetricTimeSeries` y
+`RCAEvalLoader`, con lectura separada de índice/metadatos y métricas Parquet.
+El detector, features y modelo siguen pendientes. Los puntos del esqueleto
+descritos debajo corresponden al estado inicial, anterior a esta actualización.
+
+Actualización de configuración: `config/topology.json` usa schema_version 3
+y el inventario real de columnas de los 90 casos RE2-SS. Incluye todos los
+componentes observados, métricas opcionales según disponibilidad y nombres
+originales. Unidades y dependencias aún no verificadas (`null`); no inferir
+aristas a partir de las métricas. La versión simplificada usa `required_metrics`
+y `optional_metrics` por servicio, columnas `{service}_{metric}` y un mapa
+`metric_families`. Se eliminaron conteos y campos descriptivos redundantes.
+Las unidades pendientes se documentan aquí y en README, sin convertir valores.
+Los parámetros del detector siguen sin validar. Se retiraron
+los pesos y alert_on_spike del ejemplo inicial. No existe aún un lector de
+esta configuración conectado al pipeline en aquella etapa.
+
+Actualización posterior: `src/configuration.py` define `TopologyConfig`, que
+valida schema_version 3, parámetros, servicios, familias y políticas soportadas.
+`RCAEvalLoader(configuration=config)` aplica rutas y archivos configurados y
+comprueba columnas requeridas/desconocidas. Las opcionales ausentes no se crean
+ni se rellenan. Las rutas relativas se resuelven desde el padre de `config/`.
+La forma anterior `RCAEvalLoader()` sigue disponible sin validación de topología.
+El script de entrada sigue provisional y no hay detector ni modelo implementados.
+
 - Existe el esqueleto modular; los módulos contienen documentación de
   responsabilidades, sin implementación del pipeline ML.
 - El script de entrada únicamente informa del estado provisional.
@@ -112,6 +140,9 @@ añade herramientas de desarrollo. `time` no requiere instalación.
   real disponible; si falta, solicitarla o aclarar la información necesaria.
 - No introducir nuevas decisiones de arquitectura como si ya estuvieran acordadas.
 - Respetar las modificaciones del usuario y limitar cambios al alcance solicitado.
+- Preferencia actual: no añadir pruebas automatizadas; comprobar los cambios
+  directamente con datos locales. No hacer commits mientras se trabaja en
+  metadatos; el usuario sigue gestionando Git personalmente.
 - El usuario gestiona Git: no ejecutar operaciones de Git ni crear ramas,
   commits o publicaciones. Si lo solicita, proporcionar el nombre de rama y
   mensaje del commit para que los ejecute personalmente.
@@ -131,6 +162,7 @@ python3 -m compileall -q src scripts tests
 python3 -m json.tool config/topology.json > /dev/null
 ```
 
-Cuando existan pruebas implementadas, usar `python -m pytest`. Priorizar pruebas
-de protección del baseline, transiciones, alineación de features, separación de
-incidentes y conservación de todos los servicios en validación/test.
+Hay pruebas previas del contrato de ingesta en `tests/test_ingestion.py`.
+No ampliarlas salvo nueva indicación del usuario. Para verificar la carga actual,
+usar `RCAEvalLoader` con los archivos locales y comprobar que se conservan
+los faltantes y la separación de etiquetas y métricas.

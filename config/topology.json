@@ -1,4 +1,18 @@
 {
+  "schema_version": 3,
+  "dataset": "RE2-SS",
+  "system": "Sock Shop",
+  "data_config": {
+    "root": "data/raw/RCAEval",
+    "index_file": "cases.parquet",
+    "metrics_file": "metrics.parquet",
+    "time_column": "time",
+    "timestamp_unit": "unix_seconds",
+    "metric_column_pattern": "{service}_{metric}",
+    "missing_values_policy": "preserve_nan",
+    "missing_optional_columns_policy": "preserve_as_unavailable",
+    "unit_conversion": "none"
+  },
   "detector_config": {
     "sampling_interval_sec": 1.0,
     "baseline_window_sec": 60,
@@ -6,83 +20,129 @@
     "recovery_consecutive_sec": 4,
     "max_anomaly_window_sec": 120
   },
+  "allow_external_service_references": false,
+  "metric_families": {
+    "cpu": "cpu",
+    "mem": "memory",
+    "socket": "network_sockets",
+    "error": "errors",
+    "latency-50": "latency",
+    "latency-90": "latency",
+    "diskio": "disk",
+    "workload": "workload"
+  },
   "services": [
     {
-      "name": "ts-order-service",
-      "role": "core",
-      "upstream": [
-        "ts-preserve-service",
-        "ts-cancel-service"
-      ],
-      "downstream": [
-        "ts-order-other-service",
-        "ts-inside-payment-service"
-      ],
-      "metrics": {
-        "cpu_usage_pct": {
-          "alert_on_spike": true,
-          "weight": 1.0
-        },
-        "memory_rss_mb": {
-          "alert_on_spike": true,
-          "weight": 0.8
-        },
-        "latency_p99_ms": {
-          "alert_on_spike": true,
-          "weight": 1.2
-        },
-        "http_5xx_rate": {
-          "alert_on_spike": true,
-          "weight": 1.2
-        },
-        "network_receive_bytes_per_sec": {
-          "alert_on_spike": true,
-          "weight": 1.0
-        },
-        "open_sockets_count": {
-          "alert_on_spike": true,
-          "weight": 1.0
-        }
-      }
+      "name": "carts",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "latency-50", "latency-90", "mem", "socket", "workload"],
+      "optional_metrics": ["diskio", "error"]
     },
     {
-      "name": "ts-auth-service",
-      "role": "auth",
-      "upstream": [
-        "ts-gateway-service"
-      ],
-      "downstream": [
-        "ts-verification-code-service"
-      ],
-      "metrics": {
-        "cpu_usage_pct": {
-          "alert_on_spike": true,
-          "weight": 1.0
-        },
-        "memory_rss_mb": {
-          "alert_on_spike": true,
-          "weight": 0.8
-        },
-        "latency_p99_ms": {
-          "alert_on_spike": true,
-          "weight": 1.2
-        },
-        "http_5xx_rate": {
-          "alert_on_spike": true,
-          "weight": 1.2
-        },
-        "network_receive_bytes_per_sec": {
-          "alert_on_spike": true,
-          "weight": 1.0
-        },
-        "open_sockets_count": {
-          "alert_on_spike": true,
-          "weight": 1.0
-        }
-      }
+      "name": "carts-db",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "diskio", "mem", "socket"],
+      "optional_metrics": []
+    },
+    {
+      "name": "catalogue",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "latency-50", "latency-90", "mem", "socket", "workload"],
+      "optional_metrics": ["diskio", "error"]
+    },
+    {
+      "name": "catalogue-db",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "diskio", "mem", "socket"],
+      "optional_metrics": []
+    },
+    {
+      "name": "front-end",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "latency-50", "latency-90", "mem", "socket", "workload"],
+      "optional_metrics": ["error"]
+    },
+    {
+      "name": "istio-init",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": [],
+      "optional_metrics": ["mem", "socket"]
+    },
+    {
+      "name": "orders",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "latency-50", "latency-90", "mem", "socket", "workload"],
+      "optional_metrics": ["diskio", "error"]
+    },
+    {
+      "name": "orders-db",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "diskio", "mem", "socket"],
+      "optional_metrics": []
+    },
+    {
+      "name": "payment",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "latency-50", "latency-90", "mem", "socket", "workload"],
+      "optional_metrics": ["diskio", "error"]
+    },
+    {
+      "name": "queue-master",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "diskio", "mem", "socket"],
+      "optional_metrics": []
+    },
+    {
+      "name": "rabbitmq",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "diskio", "mem", "socket"],
+      "optional_metrics": []
+    },
+    {
+      "name": "rabbitmq-exporter",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "mem", "socket"],
+      "optional_metrics": []
+    },
+    {
+      "name": "session-db",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "diskio", "mem", "socket"],
+      "optional_metrics": []
+    },
+    {
+      "name": "shipping",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "latency-50", "latency-90", "mem", "socket", "workload"],
+      "optional_metrics": []
+    },
+    {
+      "name": "user",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "latency-50", "latency-90", "mem", "socket", "workload"],
+      "optional_metrics": ["diskio", "error"]
+    },
+    {
+      "name": "user-db",
+      "upstream": null,
+      "downstream": null,
+      "required_metrics": ["cpu", "diskio", "mem", "socket"],
+      "optional_metrics": []
     }
-  ],
-  "schema_version": 1,
-  "is_example": true,
-  "allow_external_service_references": true
+  ]
 }
