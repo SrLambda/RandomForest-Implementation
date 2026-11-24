@@ -26,15 +26,41 @@ La configuración del sistema se centraliza en un archivo JSON. El notebook sirv
 
 ## Instalación local
 
-Usar Python 3.11 o superior:
+Usar Python 3.11 o superior. Desde la raíz del proyecto, crear y activar
+un entorno virtual local:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
+python -m pip check
 ```
 
 Para ejecución sin herramientas de desarrollo, instalar `requirements.txt`.
+Las dependencias de desarrollo incluyen las de ejecución, Jupyter, pytest y
+`huggingface_hub` para descargar RCAEval. `pyarrow` permite leer Parquet.
+Las versiones todavía no están fijadas; se fijarán tras validar el entorno.
+
+Comprobar el intérprete y las dependencias:
+
+```bash
+python -c "import sys; print(sys.executable)"
+python -c "import numpy, pandas, sklearn, pyarrow, huggingface_hub; print('Dependencias disponibles')"
+```
+
+El intérprete debe estar dentro de `.venv/`. En nuevas terminales, ejecutar
+`source .venv/bin/activate`; para salir del entorno, ejecutar `deactivate`.
+En VS Code, seleccionar `.venv/bin/python` como intérprete y como entorno
+del kernel del notebook.
+
+Si en Ubuntu/Debian falla la creación del entorno por falta de `venv`, instalar
+`sudo apt install python3-venv` y repetir la creación. Para una versión de Python
+instalada por separado, usar su paquete `venv` correspondiente.
+
+`.venv/`, los datos y los archivos locales `.env` están excluidos de Git;
+los archivos `requirements*.txt` sí deben versionarse. No se necesita un archivo
+`.env` para crear el entorno o descargar este dataset público.
 
 ## Estructura
 

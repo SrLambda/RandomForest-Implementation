@@ -2,3 +2,5 @@
 jupyterlab
 ipykernel
 pytest
+# Descarga selectiva del dataset RCAEval.
+huggingface_hub

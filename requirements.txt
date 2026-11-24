@@ -2,3 +2,5 @@
 numpy
 pandas
 scikit-learn
+# Lectura de métricas y metadatos en formato Parquet.
+pyarrow

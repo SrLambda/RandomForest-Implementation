@@ -1,5 +1,5 @@
 # Entorno virtual
-.venv/
+/.venv/
 
 # Python
 __pycache__/
@@ -10,6 +10,8 @@ __pycache__/
 
 # Archivos locales
 .env
+.env.*
+!.env.example
 
 # Dataset
 data/
