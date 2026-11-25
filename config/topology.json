@@ -16,8 +16,11 @@
   "detector_config": {
     "sampling_interval_sec": 1.0,
     "baseline_window_sec": 60,
+    "warmup_sec": 60,
     "z_score_threshold": 3.0,
-    "recovery_consecutive_sec": 4,
+    "anomaly_consecutive_sec": 5,
+    "recovery_consecutive_sec": 5,
+    "diagnosis_delay_sec": 10,
     "max_anomaly_window_sec": 120
   },
   "allow_external_service_references": false,

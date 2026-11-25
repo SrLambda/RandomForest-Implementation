@@ -113,6 +113,7 @@ class TopologyConfig:
         for field in (
             "sampling_interval_sec", "baseline_window_sec", "z_score_threshold",
             "recovery_consecutive_sec", "max_anomaly_window_sec",
+            "warmup_sec", "anomaly_consecutive_sec", "diagnosis_delay_sec",
         ):
             value = detector.get(field)
             if (
@@ -122,9 +123,14 @@ class TopologyConfig:
                 raise ValueError(f"{field} debe ser un número finito positivo")
         if detector["sampling_interval_sec"] != 1:
             raise ValueError("El contrato de ingesta actual requiere resolución de 1 s")
-        for field in ("baseline_window_sec", "recovery_consecutive_sec", "max_anomaly_window_sec"):
+        for field in (
+            "baseline_window_sec", "recovery_consecutive_sec", "max_anomaly_window_sec",
+            "warmup_sec", "anomaly_consecutive_sec", "diagnosis_delay_sec",
+        ):
             if detector[field] % 1:
                 raise ValueError(f"{field} debe representar segundos enteros")
+        if detector["baseline_window_sec"] < 2 or detector["warmup_sec"] < 2:
+            raise ValueError("El baseline y el calentamiento requieren al menos 2 segundos")
         families = doc.get("metric_families")
         if not isinstance(families, dict) or not families or any(
             not isinstance(k, str) or not k.strip()
