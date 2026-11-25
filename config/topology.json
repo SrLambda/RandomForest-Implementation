@@ -21,7 +21,13 @@
     "anomaly_consecutive_sec": 5,
     "recovery_consecutive_sec": 5,
     "diagnosis_delay_sec": 10,
-    "max_anomaly_window_sec": 120
+    "max_anomaly_window_sec": 120,
+    "anomaly_direction_by_family": {"latency": "increase"},
+    "minimum_deviation_multiplier_by_family": {"latency": 1.3},
+    "decrease_deviation_multiplier_by_family": {"network_sockets": 1.8},
+    "fixed_reference_families": ["cpu"],
+    "relative_increase_factor_by_family": {"latency": 10.0},
+    "relative_reference_max_cv": 0.25
   },
   "allow_external_service_references": false,
   "metric_families": {
@@ -147,5 +153,6 @@
       "required_metrics": ["cpu", "diskio", "mem", "socket"],
       "optional_metrics": []
     }
-  ]
+  ],
+  "detector_calibration_file": "detector_calibration.json"
 }
