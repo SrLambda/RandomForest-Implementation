@@ -74,24 +74,64 @@ class WindowDetector:
         self._recovery = int(p["recovery_consecutive_sec"])
         self._delay = int(p["diagnosis_delay_sec"])
         self._maximum = int(p["max_anomaly_window_sec"])
+        calibration = configuration.detector_calibration
+        self._floors = calibration["minimum_deviation"] if calibration else {}
+        self._minimum_reference_scale = calibration.get("minimum_reference_scale", {}) if calibration else {}
+        self._families = configuration.metric_families
+        self._family_by_column = {
+            f"{service['name']}_{metric}": self._families[metric]
+            for service in configuration.services
+            for metric in service["required_metrics"] + service["optional_metrics"]
+        }
+        self._directions = p.get("anomaly_direction_by_family", {})
+        self._multipliers = p.get("minimum_deviation_multiplier_by_family", {})
+        self._decrease_multipliers = p.get("decrease_deviation_multiplier_by_family", {})
+        self._fixed_families = set(p.get("fixed_reference_families", []))
+        self._relative_factors = p.get("relative_increase_factor_by_family", {})
+        self._relative_max_cv = float(p.get("relative_reference_max_cv", .25))
 
-    def _classify(self, values: np.ndarray, baseline: deque[tuple[int, np.ndarray]],) -> tuple[SampleStatus, np.ndarray, np.ndarray]:
+    @staticmethod
+    def _statistics(baseline: deque[tuple[int, np.ndarray]]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Estadísticas por métrica, sin imputar faltantes ni consultar el futuro."""
         history = np.stack([sample for _, sample in baseline])
         finite = np.isfinite(history)
         counts = finite.sum(axis=0)
         means = np.divide(
             np.where(finite, history, 0).sum(axis=0), counts,
-            out=np.zeros(len(values)), where=counts > 0,
+            out=np.zeros(history.shape[1]), where=counts > 0,
         )
         variance = np.divide(
             np.where(finite, (history - means) ** 2, 0).sum(axis=0), counts,
-            out=np.zeros(len(values)), where=counts > 0,
+            out=np.zeros(history.shape[1]), where=counts > 0,
         )
-        std = np.sqrt(variance)
+        return means, np.sqrt(variance), counts
+
+    def _classify(
+        self, values: np.ndarray, baseline: deque[tuple[int, np.ndarray]],
+        minimum_deviation: np.ndarray,
+        directions: np.ndarray,
+        decrease_deviation: np.ndarray,
+    ) -> tuple[SampleStatus, np.ndarray, np.ndarray]:
+        return self._classify_reference(
+            values, self._statistics(baseline), minimum_deviation, directions, decrease_deviation,
+        )
+
+    def _classify_reference(
+        self, values: np.ndarray, statistics: tuple[np.ndarray, np.ndarray, np.ndarray],
+        minimum_deviation: np.ndarray, directions: np.ndarray, decrease_deviation: np.ndarray,
+    ) -> tuple[SampleStatus, np.ndarray, np.ndarray]:
+        means, std, counts = statistics
         available = np.isfinite(values) & (counts >= 2)
-        anomalous = available & (
-            ((std > 0) & (np.abs(values - means) > self._threshold * std))
-            | ((std == 0) & ~np.isclose(values, means, rtol=1e-9, atol=0))
+        limits = np.maximum(self._threshold * std, minimum_deviation)
+        lower_limits = np.maximum(self._threshold * std, decrease_deviation)
+        delta = values - means
+        exceeds = (
+            ((directions == 0) & ((delta > limits) | (delta < -lower_limits)))
+            | ((directions == 1) & (delta > limits))
+            | ((directions == -1) & (delta < -lower_limits))
+        )
+        anomalous = available & exceeds & ~np.isclose(
+            values, means, rtol=1e-9, atol=0,
         )
         status = (SampleStatus.ANOMALOUS if anomalous.any() else
                   SampleStatus.HEALTHY if available.all() else SampleStatus.UNKNOWN)
@@ -109,6 +149,23 @@ class WindowDetector:
         frame = metrics.frame
         self._configuration.validate_columns(frame.columns.tolist())
         names = [name for name in frame.columns if name != "time"]
+        # Valores ya calibrados offline, sin consultar etiquetas del caso actual.
+        families = [self._family_by_column[name] for name in names]
+        minimum_deviation = np.array([
+            self._floors.get(name, 0.) * self._multipliers.get(family, 1.)
+            for name, family in zip(names, families)
+        ])
+        decrease_deviation = minimum_deviation * np.array([
+            self._decrease_multipliers.get(family, 1.) for family in families
+        ])
+        direction_codes = {"both": 0, "increase": 1, "decrease": -1}
+        directions = np.array([
+            direction_codes[self._directions.get(family, "both")] for family in families
+        ])
+        fixed_mask = np.array([family in self._fixed_families for family in families])
+        relative_factors = np.array([self._relative_factors.get(family, 0.) for family in families])
+        minimum_reference_scale = np.array([self._minimum_reference_scale.get(name, 0.) for name in names])
+        fixed_statistics: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
         baseline: deque[tuple[int, np.ndarray]] = deque(maxlen=self._baseline_size)
         pending: list[_PendingDiagnosis] = []
         state = DetectorState.WARMUP
@@ -135,10 +192,39 @@ class WindowDetector:
                 anomalous = np.zeros(len(names), dtype=bool)
                 unavailable = ~np.isfinite(values)
                 if position + 1 == self._warmup:
+                    if fixed_mask.any() or relative_factors.any():
+                        fixed_statistics = self._statistics(baseline)
                     state = DetectorState.NORMAL
                     events.append(DetectorEvent("WARMUP_COMPLETE", timestamp, metrics.incident_id))
             else:
-                status, anomalous, unavailable = self._classify(values, baseline)
+                status, anomalous, unavailable = self._classify(
+                    values, baseline, minimum_deviation, directions, decrease_deviation,
+                )
+                if fixed_statistics is not None:
+                    means, std, counts = fixed_statistics
+                    _, fixed_anomalous, fixed_unavailable = self._classify_reference(
+                        values, fixed_statistics, minimum_deviation, directions, decrease_deviation,
+                    )
+                    # La referencia fija protege ante crecimiento acumulado.
+                    # Una bajada desde un arranque cargado no es sobrecarga;
+                    # el detector móvil conserva su criterio para caídas bruscas.
+                    fixed_anomalous &= values > means
+                    scales = np.maximum(np.abs(means), std)
+                    # Una referencia demasiado baja respecto a los arranques de
+                    # calibración no acredita una razón de crecimiento fiable.
+                    relative_mask = (
+                        (relative_factors > 1) & (scales > 0)
+                        & (scales >= minimum_reference_scale)
+                        & (std <= self._relative_max_cv * np.abs(means))
+                    )
+                    relative_limits = np.maximum(self._threshold * std, (relative_factors - 1) * scales)
+                    relative_anomalous = (
+                        relative_mask & ~fixed_unavailable & ((values - means) > relative_limits)
+                    )
+                    anomalous |= (fixed_mask & fixed_anomalous) | relative_anomalous
+                    unavailable &= fixed_unavailable | ~(fixed_mask | relative_mask)
+                    status = (SampleStatus.ANOMALOUS if anomalous.any() else
+                              SampleStatus.UNKNOWN if unavailable.any() else SampleStatus.HEALTHY)
                 if state == DetectorState.NORMAL:
                     if status == SampleStatus.ANOMALOUS:
                         state = DetectorState.OBSERVATION

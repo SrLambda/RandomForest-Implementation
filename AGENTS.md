@@ -134,6 +134,128 @@ añade herramientas de desarrollo. `time` no requiere instalación.
 
 ## Estado al crear este contexto
 
+Las actualizaciones siguientes están ordenadas de más reciente a más antigua;
+ante discrepancias, prevalece la primera actualización aplicable.
+
+Etapa vigente: el usuario decidió posponer el perfeccionamiento del detector y
+continuar con features. No reanudar ajustes de falsas alertas salvo nueva petición.
+`src/feature_builder.py` implementa FeatureBuilder y FeatureBatch(X, identifiers),
+con groups=incident_id. build recibe únicamente DIAGNOSIS_DUE, baseline y datos
+hasta el diagnóstico; rechaza futuro/solapamiento y no consulta etiquetas.
+Esquema v1 de 153 variables: 16 estadísticas por cada uno de los 8 sufijos,
+resúmenes locales y contexto entre servicios (cambios normalizados, severidad,
+percentiles, exceso frente a pares y orden de desviación). Los scores resumen
+evidencia estadística disponible, no prueban causalidad ni salud de datos faltantes.
+Métricas ausentes conservan NaN con indicadores, componentes totalmente ausentes
+no se inventan; todos los servicios observados permanecen como candidatos.
+El contexto se calcula ANTES de submuestrear train. No hay imputación aprendida
+ni transformaciones ajustadas en el builder; ajustar cualquier imputador solo en train.
+assign_root_cause_labels es una función offline separada: rechaza ventanas que
+empiezan antes de inyección y exige causa raíz entre candidatos. No poner y/IDs,
+inyección, tipo de fallo o causa raíz en X.
+`python -m scripts.build_features --incident <case> [--labels] [--output <nuevo-dir>]`
+exporta X, identifiers, y opcional y manifest a data/processed/features/<case>.
+Solo desarrollo, primer diagnóstico completo seleccionado SIN consultar etiquetas;
+sin diagnóstico produce mensaje explícito, no una muestra ficticia. No sobrescribe.
+Ejemplo local generado: re2ss_carts_cpu_1, 15 servicios ×153 features, y=1/14.
+Revisión de los 72 casos: 69 primeras ventanas etiquetables, 2 primeras ventanas
+preinyección sin etiqueta y 1 caso sin diagnóstico. No confundir ese 69 con la
+cobertura 71 del detector: puede haber diagnósticos válidos posteriores en casos
+con falsa alerta inicial. Reporte en reports/features/development_validation.*.
+Pendiente definir/implementar la asociación de ventanas al dataset supervisado,
+sin ocultar falsas alertas ni omisiones y manteniendo una muestra por incidente/
+servicio según formulación acordada. No se construyó el dataset completo ni se
+entrenó Random Forest. GroupKFold, undersampling y ranking siguen pendientes.
+Mantener la obligación de recalibrar detector/tolerancias dentro de train de
+cada fold futuro; los features actuales son exploratorios con el detector vigente.
+Se verificaron directamente esquema común, valores locales/contexto, NaN sin
+infinitos, IDs separados, etiquetas y causalidad. No hay pruebas nuevas ni Git.
+
+Revisión vigente de omisiones de desarrollo: detector equilibrado con referencia
+fija adicional para aumentos acumulados de CPU (`fixed_reference_families=["cpu"]`)
+y señal de aumento relativo de latencia (`relative_increase_factor_by_family`,
+latency=10). La razón relativa solo se usa si hay >=2 valores finitos, escala
+positiva, CV <= 0.25 (`relative_reference_max_cv`) y escala inicial >=
+`minimum_reference_scale` aprendida con los mismos 48 casos de ajuste.
+Ese piso es el cuantil 0.05 de max(abs(media),std) del calentamiento por métrica;
+se añade a detector_calibration.json SIN cambiar tolerancias absolutas ni IDs
+48/24. El detector no recibe etiquetas, inyección ni muestras futuras.
+La referencia fija solo busca aumentos; las caídas desde un arranque cargado no
+activan esa señal, aunque el detector móvil conserva las reglas de caídas.
+Resultados actuales: 71/72 detecciones, 1 omisión, 4 falsas alertas en 2 casos,
+retraso mediano 21 s entre detectados. Se recuperan carts_cpu_1, carts_delay_1/2/3,
+carts_loss_1 y orders_cpu_1, sin perder ninguna detección previa. No aumentaron
+las falsas alertas ni su ocupación preinyección (~0.17%). Los tiempos 60/5/5/10
+siguen iguales. Reportes: reports/detector/development_review/ y
+reports/detector/reference_increase/; comparación por IDs y diagnóstico de las
+7 omisiones originales en comparison.json/original_miss_diagnostics.csv.
+El evaluador genera miss_diagnostics.csv con métricas de las omisiones actuales.
+Queda re2ss_carts_socket_1: calentamiento variable (CV de carts_latency-50 ~0.73)
+y rangos solapados antes/después de inyección; no afirmar que es indetectable ni
+forzar una excepción por caso. La hipótesis de arranque sano no garantiza
+estabilidad real. Aceptar esta limitación documentada como base provisional antes
+de features, salvo nuevas decisiones del usuario. Se compararon variantes en
+desarrollo; estas cifras NO son independientes, ni resultados de test.
+No se leyeron métricas de test. Verificaciones manuales de crecimiento gradual,
+latencia relativa, referencias inválidas, faltantes, eventos y causalidad por
+prefijos; calibración reproducible. No se añadieron pruebas ni se ejecutó Git.
+
+Refinamiento vigente del detector: se analizaron las falsas alertas restantes y
+se añadieron reglas configurables por familia (sin excepciones por incidente).
+Configuración activa equilibrada en topology.json: anomaly_direction_by_family
+latency=increase; minimum_deviation_multiplier_by_family latency=1.3;
+decrease_deviation_multiplier_by_family network_sockets=1.8. El incremento de
+sockets conserva el umbral anterior; caídas grandes siguen pudiendo alertar.
+Las demás familias conservan dirección bilateral. Los mapas son opcionales y
+se validan; sin ellos se reproduce el comportamiento previo. La pertenencia
+de columnas a familias se obtiene del JSON, no separando nombres heurísticamente.
+Las tolerancias aprendidas de 48 casos, el warmup y los tiempos 5/5/10 no cambiaron.
+Verificación en 72 casos de desarrollo: falsas alertas 9→4, casos afectados 3→2,
+ocupación normal en ALERT 1.63%→0.17%, detecciones nuevas 65/72 y 7 omisiones.
+Misma cobertura agregada pero NO mismos casos: se pierde re2ss_carts_delay_3 y
+se recupera re2ss_catalogue_loss_2. Retraso mediano 22 s entre detectados.
+Reportes locales: family_refined/ (configuración activa), family_asymmetric/,
+family_comparison.json (comparación por caso y advertencias).
+La variante con multiplicador latency=1.5 y el mismo margen asimétrico de sockets
+produce 0 falsas alertas en desarrollo pero solo 64 detecciones (8 omisiones);
+está en reports/detector/family_asymmetric_strict/, no activada por defecto.
+Se solicitó preferencia opcional al usuario; ante ausencia de respuesta se dejó
+la variante equilibrada. Una instrucción posterior puede cambiar esa elección.
+No afirmar eliminación total ni garantías fuera de desarrollo: estas variantes
+se eligieron tras inspeccionar sus resultados, incluso comprobación interna.
+Los 18 casos de test no se evaluaron. No se añadieron pruebas automatizadas ni
+se ejecutó Git. Se comprobaron manualmente direcciones, eventos y causalidad.
+
+Evaluación y reducción de falsas alertas implementadas: `src/detector_evaluation.py`
+y `python -m scripts.evaluate_detector` evalúan SOLO los 72 casos de desarrollo.
+Reportes locales excluidos de Git en `reports/detector/`: baseline, variantes,
+comparación, CSV por caso/evento/fallo y JSON con instantáneas reproducibles.
+No se leyeron métricas de los 18 casos de test para ajustar o evaluar.
+`src/detector_calibration.py` y `python -m scripts.calibrate_detector` generan
+tolerancias offline con datos normales preinyección de 48 casos de desarrollo;
+otros 24 se reservan para comprobación interna (4 por fallo, semilla 42).
+Archivo seleccionado: `config/detector_calibration.json`, referenciado por
+`detector_calibration_file` en topology.json, ruta relativa al directorio del JSON.
+Tolerancia = 2 × cuantil 0.999 de desvíos normales respecto al promedio de warmup
+por columna. Umbral efectivo max(3×std, tolerancia), sin inyección en el detector.
+84 métricas calibradas; istio-init_mem/socket sin calibrar conservan la regla
+original. Validar IDs de ajuste/comprobación contra la partición antes de ejecutar.
+El archivo de calibración no se sobrescribe automáticamente.
+Resultados desarrollo antes/después: casos con falsa alerta 72→3, total falsas
+alertas 72→9, fracción preinyección en ALERT 99.29%→1.63%, detecciones nuevas
+postinyección 0→65/72; 7 casos sin detección nueva. Retraso mediano 22 s entre
+detectados. En comprobación interna: 3/24 casos con falsas alertas, 22/24 con
+nueva detección. Se compararon alternativas usando desarrollo; no presentar
+comprobación interna como estimación independiente ni afirmar eliminación total.
+re2ss_carts_cpu_1 dejó de dar falsa alerta pero tampoco detecta el fallo con este
+ajuste. No hay etiqueta de fin de fallo para validar recuperación real.
+Pendiente analizar las falsas alertas/omisiones restantes; no ocultar el compromiso
+sensibilidad/falsas alarmas. Para el futuro GroupKFold del modelo, recalibrar
+cualquier tolerancia aprendida exclusivamente con train del fold: la calibración
+global actual es exploratoria y NO debe reutilizarse como si fuera independiente.
+Verificaciones manuales: ajuste reproducible, separación de test, eventos 5/5/10,
+faltantes y causalidad de las ventanas. No se añadieron pruebas automatizadas.
+
 Partición ya persistida: `config/incident_split.json`, semilla 42, 72 desarrollo
 y 18 test. `src/evaluation.py` implementa `IncidentSplit.create/load/validate/save`;
 `python -m scripts.create_incident_split` crea el manifiesto una sola vez o valida

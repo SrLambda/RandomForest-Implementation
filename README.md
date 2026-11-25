@@ -96,7 +96,8 @@ inyectados.
 El detector contempla resolución objetivo de 1 segundo, baseline de 60 segundos,
 umbral Z-score de 3, recuperación de 5 segundos consecutivos y máximo de ventana
 anómala de 120 segundos.
-Estos parámetros son iniciales y todavía no están calibrados. `TopologyConfig`
+Los tiempos siguen los acuerdos iniciales; se añadieron tolerancias por métrica
+calibradas en desarrollo. `TopologyConfig`
 valida el JSON y permite conectar su configuración con `RCAEvalLoader`:
 
 ```python
@@ -120,8 +121,15 @@ entrada `run_pipeline.py` sigue siendo provisional: no ejecuta detección ni ML.
 `WindowDetector` procesa cada caso de forma independiente: calentamiento de
 60 segundos, estados NORMAL/OBSERVATION/ALERT, confirmación tras 5 segundos
 irregulares y recuperación tras 5 segundos sanos. El baseline se congela ante
-sospechas. Se utiliza Z-score bilateral; con desviación cero, un cambio del valor
-constante se considera anómalo. Son reglas iniciales pendientes de calibración.
+sospechas. Se utiliza Z-score con dirección configurable por familia y tolerancia mínima por métrica
+para no alertar ante cambios normales cuando la desviación inicial es pequeña
+o cero. El umbral efectivo es el mayor entre `3 × desviación` y esa tolerancia,
+aplicando los multiplicadores configurados. Una caída aislada de latencia no se
+considera degradación cuando su dirección está configurada como `increase`.
+La referencia fija de CPU complementa al histórico móvil para detectar aumentos
+acumulados. La latencia dispone de una señal adicional ante aumentos de más de
+10 veces su referencia inicial, siempre que esta sea estable (CV <= 0.25) y
+no quede por debajo de la escala mínima aprendida en calibración.
 
 Una anomalía observable puede confirmar alerta aunque falten otras métricas.
 Para acreditar salud se exige que todas las métricas presentes sean evaluables;
@@ -150,6 +158,76 @@ los datos. El script valida la partición y usa desarrollo por defecto.
 La opción `--partition test` se reserva para la evaluación final; no usarla
 para calibrar umbrales o elegir features.
 
+## Evaluación del detector en desarrollo
+
+```bash
+python -m scripts.evaluate_detector --output reports/detector/development
+```
+
+Evalúa exclusivamente los 72 casos de desarrollo y guarda `cases.csv`,
+`events.csv`, `by_fault.csv`, `miss_diagnostics.csv`, `summary.json` e instantáneas de configuración.
+La inyección se utiliza para evaluar; una alerta anterior que sigue activa
+durante el fallo no se cuenta como nueva detección. No hay etiqueta de fin de
+fallo, por lo que un evento RECOVERED no demuestra recuperación real.
+
+`config/detector_calibration.json` contiene tolerancias ajustadas con los
+periodos anteriores a la inyección de 48 casos de desarrollo. Los otros 24
+se usan para comprobación interna. Se emplea el cuantil 0.999 del desvío respecto
+al promedio de calentamiento, con margen 2. El detector no consulta etiquetas
+al ejecutarse. Dos métricas de `istio-init` no pudieron calibrarse y conservan
+la regla original; el archivo las identifica expresamente.
+El mismo archivo incluye `minimum_reference_scale`, el cuantil 0.05 de las
+escalas de calentamiento de esos 48 casos. Se utiliza para descartar razones
+de crecimiento poco fiables, sin modificar las tolerancias absolutas anteriores.
+
+Para reproducir el ajuste en un archivo nuevo, sin sobrescribir el vigente:
+
+```bash
+python -m scripts.calibrate_detector --output reports/detector/recalibration.json
+```
+
+La configuración actual detecta 71/72 incidentes de desarrollo y mantiene
+4 falsas alertas en 2 casos. Recuperó seis omisiones sin perder detecciones
+anteriores ni aumentar las falsas alertas. El retraso mediano entre detectados
+es de 21 s. Estas cifras se usaron para elegir la configuración: son resultados
+de desarrollo, no una estimación independiente ni resultados de los 18 casos
+de test. El ejemplo `re2ss_carts_cpu_1` ahora detecta el fallo sin alerta temprana.
+
+Queda sin detectar `re2ss_carts_socket_1`: su calentamiento es variable y varias
+métricas presentan rangos solapados antes y después de la inyección. Esto no
+demuestra que sea imposible detectarlo; documenta una limitación del método.
+No hay excepciones por identificador de incidente. `miss_diagnostics.csv`
+incluye rangos, faltantes y calidad de la referencia para revisar las omisiones.
+
+El ajuste sigue abierto: una tolerancia mayor puede ocultar fallos pequeños.
+En la futura validación GroupKFold, cualquier tolerancia aprendida deberá
+ajustarse solo con el train del fold, sin reutilizar globalmente esta calibración.
+
+Se evaluaron además reglas por familia: dirección creciente para latencia y
+margen adicional solo para caídas de sockets, conservando su sensibilidad a
+aumentos. Mantienen calentamiento, confirmación, recuperación y diagnóstico.
+
+| Configuración en desarrollo | Falsas alertas | Casos con falsas alertas | Detecciones nuevas |
+| --- | ---: | ---: | ---: |
+| Tolerancias originales | 9 | 3 | 65/72 |
+| Equilibrada: latencia ×1.3, caídas de sockets ×1.8 | 4 | 2 | 65/72 |
+| Más estricta: latencia ×1.5, caídas de sockets ×1.8 | 0 | 0 | 64/72 |
+| Equilibrada con referencias protegidas (actual) | 4 | 2 | 71/72 |
+
+Los parámetros son `anomaly_direction_by_family`,
+`minimum_deviation_multiplier_by_family` y
+`decrease_deviation_multiplier_by_family`, dentro de `detector_config`.
+Sin estos parámetros se conserva el comportamiento bilateral anterior.
+La comparación local está en `reports/detector/family_comparison.json`.
+La configuración activa es la equilibrada con referencias; su reporte está en
+`reports/detector/development_review/`. El tiempo normal pasado en ALERTA se
+mantiene en 0.17%. Los controles nuevos son `fixed_reference_families`,
+`relative_increase_factor_by_family` y `relative_reference_max_cv`.
+Si una referencia relativa no es fiable, se conserva el criterio del detector
+base, sin forzar la clasificación ni utilizar etiquetas. La referencia fija
+adicional vigila aumentos; el detector móvil conserva su evaluación de caídas.
+Cero falsas alertas observadas no garantiza cero en datos nuevos.
+
 ## Partición de incidentes
 
 `config/incident_split.json` fija 72 incidentes de desarrollo y 18 de test con
@@ -170,3 +248,34 @@ etiquetas; no verifica el contenido de los archivos de métricas.
 GroupKFold se aplicará dentro de desarrollo. Validación/test conservan todos los
 servicios y nunca reciben submuestreo. El caso `re2ss_carts_cpu_1` ya se había
 inspeccionado antes de reservar test; no se utilizó para ajustar esta selección.
+
+## Features por servicio
+
+`FeatureBuilder` recibe un evento DIAGNOSIS_DUE y construye una fila por servicio
+observado, con 153 variables numéricas de esquema fijo. Incluye estadísticas
+locales, cambios frente al baseline, faltantes, desviaciones estadísticas y
+comparaciones de intensidad y orden de aparición respecto a los otros servicios.
+Los cambios normalizados son adimensionales; no se convierten unidades.
+
+```bash
+python -m scripts.build_features --incident re2ss_carts_cpu_1 --labels --output data/processed/features/carts_cpu_demo
+```
+
+Genera `X.parquet`, `identifiers.parquet`, `manifest.json` y, con `--labels`,
+`y.parquet`. El directorio de salida debe ser nuevo. Los IDs y timestamps de
+diagnóstico quedan fuera de X; `incident_id` en identifiers es el grupo para
+GroupKFold. En el ejemplo hay 15 candidatos: una causa raíz y 14 servicios restantes.
+
+La extracción usa exclusivamente el baseline anterior a la sospecha y las
+observaciones hasta el diagnóstico. Conserva NaN y señala métricas ausentes;
+la imputación deberá ajustarse solo con train. El contexto se calcula con todos
+los candidatos antes de cualquier submuestreo, que seguirá limitado a train.
+
+El comando selecciona el primer diagnóstico completo sin mirar las etiquetas.
+El etiquetado offline se rechaza si la ventana comienza antes de la inyección,
+para evitar asignarle una causa raíz futura. La comprobación en desarrollo
+obtuvo 69 primeras ventanas etiquetables, 2 anteriores a la inyección sin
+etiquetar y 1 caso sin diagnóstico completo. Esto no sustituye la cobertura
+del detector ni constituye aún el dataset completo de entrenamiento: falta
+asociar las ventanas a los incidentes para esa etapa y reportar las omisiones.
+La revisión está en `reports/features/development_validation.json`.
