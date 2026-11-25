@@ -137,6 +137,32 @@ añade herramientas de desarrollo. `time` no requiere instalación.
 Las actualizaciones siguientes están ordenadas de más reciente a más antigua;
 ante discrepancias, prevalece la primera actualización aplicable.
 
+Preparación de datos para entrenamiento implementada en `src/data_preparation.py`.
+`python -m scripts.prepare_training_data` consume development_folds y crea
+data/processed/prepared_development_folds (directorio nuevo obligatorio).
+Opciones: --source, --output, --negative-ratio (1 por defecto) y --seed (42).
+TrainMedianImputer aprende medianas de TODAS las filas asociadas de train ANTES
+del submuestreo. Columnas completamente NaN en train usan constante 0, registrada
+en imputer.json; este valor no acredita salud ni usa información de validación.
+No cambia el esquema de 153 features ni los indicadores existentes. Transform
+no reajusta valores; el estado JSON puede restaurarse con from_state.
+El submuestreo conserva todos los positivos y elige negativos sin reemplazo,
+reproducible con semilla fija. La proporción indica el máximo de negativos por
+positivo, redondeado hacia arriba; no duplica filas si faltan negativos.
+Validación conserva todas sus filas, servicios, etiquetas y orden, sin balanceo.
+Cada fold exporta X/y/identifiers/groups, source_rows para rastrear posiciones
+en origen, estado del imputador y manifiesto con procedencia/auditorías de origen.
+Se comprueban IDs, partición, calibración train y coherencia con las auditorías.
+Ejecución local de los cinco folds: train 841→112, 782→104, 796→106, 797→106,
+797→106; proporción 1:1. Validación completa 211/195/196/210/195 = 1.007 filas.
+Verificación directa: medianas coinciden exactamente con train original, sin
+NaN/infinitos en salida, etiquetas/IDs alineados, sin repetición de filas,
+positivos conservados y selección reproducible. Comprobados respaldo de columna
+vacía, serialización y proporciones inválidas con fragmentos manuales, sin
+añadir pruebas automatizadas ni tocar Git. No se consultaron métricas de test.
+Siguiente tarea: Random Forest y ranking; la cobertura de validación sigue en
+67/72 y las limitaciones de CV exploratoria descritas abajo permanecen.
+
 Preparación por folds implementada: `src/cross_validation.py` y
 `python -m scripts.prepare_folds [--n-splits 5] [--output <directorio-nuevo>]`.
 GroupKFold determinista sobre los 72 IDs ANTES del detector, incluyendo omisiones;
