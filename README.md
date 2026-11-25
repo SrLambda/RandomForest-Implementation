@@ -276,6 +276,29 @@ El etiquetado offline se rechaza si la ventana comienza antes de la inyección,
 para evitar asignarle una causa raíz futura. La comprobación en desarrollo
 obtuvo 69 primeras ventanas etiquetables, 2 anteriores a la inyección sin
 etiquetar y 1 caso sin diagnóstico completo. Esto no sustituye la cobertura
-del detector ni constituye aún el dataset completo de entrenamiento: falta
-asociar las ventanas a los incidentes para esa etapa y reportar las omisiones.
+del detector. Corresponde al comando por caso; la construcción por folds
+asocia ventanas y conserva las omisiones en sus auditorías.
 La revisión está en `reports/features/development_validation.json`.
+
+## Random Forest por fold
+
+Con los folds ya preparados mediante `scripts.prepare_folds` y
+`scripts.prepare_training_data`, ejecutar:
+
+```bash
+python -m scripts.train_random_forest
+```
+
+Los parámetros base se cargan desde `config/random_forest.json`. Se entrena un
+bosque por fold usando su train imputado y submuestreado; validación conserva
+todos los servicios. El modelo recibe únicamente features numéricas, sin IDs
+ni etiquetas entre sus entradas. El directorio de salida debe ser nuevo y puede
+indicarse mediante `--output`.
+
+La salida local `artifacts/random_forest/development/` incluye modelos por fold,
+imputadores, manifiestos y `validation_scores.parquet`. Las puntuaciones de
+clase 1 permiten ordenar candidatos, pero no son probabilidades calibradas ni
+demuestran causalidad. Las importancias de variables tampoco prueban causalidad.
+Las auditorías conservan los casos sin ventana asociable. Esta ejecución es
+exploratoria en desarrollo; no utiliza el test final ni genera un modelo final
+para producción. El cálculo de Top-1, Top-3 y MRR sigue pendiente.
