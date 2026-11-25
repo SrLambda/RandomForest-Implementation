@@ -1,4 +1,4 @@
-"""Partición por incidente; GroupKFold y balanceo de train aún pendientes."""
+"""Reserva persistida por incidente; folds en cross_validation y balanceo pendiente."""
 
 from collections import Counter, defaultdict
 from collections.abc import Iterable

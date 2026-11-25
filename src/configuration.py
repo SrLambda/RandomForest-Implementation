@@ -68,6 +68,21 @@ class TopologyConfig:
         ):
             raise ValueError("La calibración no corresponde a desarrollo 48/24 del manifiesto")
 
+    def validate_fold_calibration(
+        self, train: tuple[str, ...], validation: tuple[str, ...],
+        development: tuple[str, ...], metadata_sha256: str,
+    ) -> None:
+        """Exigir tolerancias ajustadas exactamente con train de este fold."""
+        if (not train or not validation or len(set(train)) != len(train)
+                or len(set(validation)) != len(validation) or set(train) & set(validation)
+                or set(train) | set(validation) != set(development)):
+            raise ValueError('Fold incompatible con la partición de desarrollo')
+        calibration = self._calibration
+        if (calibration is None or set(calibration['fit_incidents']) != set(train)
+                or set(calibration['validation_incidents']) != set(validation)
+                or calibration.get('metadata_sha256') != metadata_sha256):
+            raise ValueError('La calibración debe ajustarse solo con el train del fold')
+
     @property
     def dataset(self) -> str:
         return self._document["dataset"]
