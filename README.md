@@ -94,7 +94,7 @@ componentes observados y no restringe candidatos a los servicios con fallos
 inyectados.
 
 El detector contempla resolución objetivo de 1 segundo, baseline de 60 segundos,
-umbral Z-score de 3, recuperación de 4 segundos consecutivos y máximo de ventana
+umbral Z-score de 3, recuperación de 5 segundos consecutivos y máximo de ventana
 anómala de 120 segundos.
 Estos parámetros son iniciales y todavía no están calibrados. `TopologyConfig`
 valida el JSON y permite conectar su configuración con `RCAEvalLoader`:
@@ -114,3 +114,59 @@ Las rutas relativas de datos se resuelven desde el directorio padre de `config/`
 La carga configurada rechaza columnas desconocidas y requeridas ausentes;
 conserva las opcionales ausentes sin crearlas ni rellenarlas. El punto de
 entrada `run_pipeline.py` sigue siendo provisional: no ejecuta detección ni ML.
+
+## Detector de ventanas
+
+`WindowDetector` procesa cada caso de forma independiente: calentamiento de
+60 segundos, estados NORMAL/OBSERVATION/ALERT, confirmación tras 5 segundos
+irregulares y recuperación tras 5 segundos sanos. El baseline se congela ante
+sospechas. Se utiliza Z-score bilateral; con desviación cero, un cambio del valor
+constante se considera anómalo. Son reglas iniciales pendientes de calibración.
+
+Una anomalía observable puede confirmar alerta aunque falten otras métricas.
+Para acreditar salud se exige que todas las métricas presentes sean evaluables;
+si no, la observación es UNKNOWN e interrumpe las seguidillas. Las columnas
+opcionales ausentes no se agregan. Los faltantes persistentes pueden impedir
+la recuperación automática y deben revisarse antes de calibrar el detector.
+
+Ejecutar desde la raíz del repositorio, con el entorno activado:
+
+```bash
+python -m scripts.run_window_detector --incident re2ss_carts_cpu_1
+```
+
+La consola muestra ALERT_CONFIRMED inmediatamente y DIAGNOSIS_DUE 10 segundos
+después, aunque el incidente ya se haya recuperado. Este último evento contiene
+baseline y observaciones disponibles hasta ese instante para el futuro modelo;
+todavía no produce un ranking. No consulta causas raíz ni tiempos de inyección.
+En OBSERVATION se conservan como máximo las últimas 120 muestras sospechosas;
+el evento también conserva el timestamp inicial de la sospecha.
+
+El máximo de ventana segmenta la alerta sin declarar recuperación ni generar
+otro diagnóstico. Un archivo que acaba antes del diagnóstico produce
+DIAGNOSIS_INCOMPLETE. El calentamiento, la observación y el último segmento
+también pueden quedar sin completar; no se infiere recuperación al terminar
+los datos. El script valida la partición y usa desarrollo por defecto.
+La opción `--partition test` se reserva para la evaluación final; no usarla
+para calibrar umbrales o elegir features.
+
+## Partición de incidentes
+
+`config/incident_split.json` fija 72 incidentes de desarrollo y 18 de test con
+semilla 42. Test contiene 3 casos por cada tipo de fallo y 3 o 4 por servicio;
+cada combinación servicio/fallo conserva al menos dos casos en desarrollo.
+La selección utiliza metadatos, sin consultar métricas ni resultados del modelo.
+Los datos no se mueven: el manifiesto solo almacena identificadores y debe
+versionarse para mantener la misma evaluación.
+
+```bash
+python -m scripts.create_incident_split
+```
+
+El comando reutiliza y valida el manifiesto si existe, sin sobrescribirlo ni
+aplicar otra semilla. La huella de metadatos detecta cambios de identidad o
+etiquetas; no verifica el contenido de los archivos de métricas.
+`IncidentSplit.load()` expone `development` y `test` para la futura orquestación.
+GroupKFold se aplicará dentro de desarrollo. Validación/test conservan todos los
+servicios y nunca reciben submuestreo. El caso `re2ss_carts_cpu_1` ya se había
+inspeccionado antes de reservar test; no se utilizó para ajustar esta selección.

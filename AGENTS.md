@@ -40,6 +40,43 @@ la descripción del estado puede quedar desactualizada.
   `time.perf_counter()` para medir duraciones de ejecución y procesamiento.
   La reproducción con pausas de un segundo es opcional, separada del entrenamiento.
 
+### Reglas del detector y diagnóstico acordadas antes de implementarlo
+
+Estas decisiones sustituyen los valores anteriores cuando haya discrepancias.
+Son requisitos acordados, no funcionalidad ya implementada ni parámetros
+calibrados experimentalmente. Actualizar JSON y validador al implementar.
+
+- Calentamiento inicial de 60 segundos por caso, bajo la hipótesis explícita
+  de arranque sano. No consultar el instante de inyección para decidir el
+  calentamiento, disparar alertas o seleccionar observaciones predictoras.
+- Después del calentamiento, flujo de estados NORMAL → OBSERVACIÓN → ALERTA,
+  con retorno a NORMAL tras recuperación sostenida.
+- La primera muestra fuera del umbral inicia OBSERVACIÓN y congela el baseline.
+- Confirmar ALERTA con 5 segundos consecutivos de irregularidad. La seguidilla
+  es temporal: una misma métrica puede sostenerla; no se exige que sean varias
+  métricas distintas simultáneamente.
+- Durante OBSERVACIÓN y ALERTA no incorporar muestras sospechosas al baseline.
+  Descartarlas también si la observación no llega a convertirse en alerta.
+- Volver a NORMAL tras 5 segundos consecutivos dentro del umbral seguro,
+  tanto al descartar una sospecha como al recuperar una alerta.
+- Una muestra normal interrumpe la seguidilla de anomalía; una anómala
+  interrumpe la de recuperación. Un dato faltante interrumpe ambas cuentas:
+  no acredita salud, anomalía ni recuperación. Señalar la falta de información.
+  Aún debe concretarse cómo agregar métricas parcialmente faltantes para
+  clasificar una observación global; no interpretar una opcional ausente como cero.
+- Avisar al usuario inmediatamente al confirmar ALERTA.
+- Programar el primer diagnóstico/ranking RCA para 10 segundos después de
+  confirmar ALERTA, utilizando solo información disponible hasta ese instante.
+- Si hay recuperación antes de esos 10 segundos, mantener el diagnóstico
+  programado e indicar que el incidente ya se recuperó.
+- Emitir un primer ranking; actualizaciones periódicas quedan para otra etapa.
+- Si se alcanza el máximo de ventana (valor inicial de 120 s) y persiste la
+  anomalía, continuar en ALERTA. Se puede segmentar la recogida sin declarar
+  recuperación ni contaminar el baseline.
+- El sistema identifica causas candidatas; proponer o ejecutar remedios no
+  pertenece al alcance actual. La recuperación depende de las métricas,
+  no de que alguien haya anunciado una solución.
+
 ### Formulación del problema: enfoque B
 
 - Una muestra tabular por `(incident_id, service)`.
@@ -66,6 +103,13 @@ la descripción del estado puede quedar desactualizada.
   puntuaciones son probabilidades calibradas.
 - Respetar también la separación experimental al ajustar el detector.
   Reportar incidentes no detectados y falsas alarmas, además del ranking.
+- Reparto acordado: 72 incidentes de desarrollo y 18 de test final. Reservar
+  test antes de calibrar detector, features o modelo; aplicar GroupKFold dentro
+  de desarrollo. Mantener todos los servicios de validación/test sin submuestreo.
+- La selección concreta sigue pendiente: usar semilla fija, persistir los
+  identificadores y procurar equilibrio por servicio causa raíz y tipo de fallo.
+  Hay 5 servicios × 6 fallos × 3 repeticiones: reservar una repetición por cada
+  combinación produciría 30 casos, por lo que no corresponde al reparto 72/18.
 
 ## Organización del código
 
@@ -89,6 +133,45 @@ documentado y sin lógica principal trasladada al notebook.
 añade herramientas de desarrollo. `time` no requiere instalación.
 
 ## Estado al crear este contexto
+
+Partición ya persistida: `config/incident_split.json`, semilla 42, 72 desarrollo
+y 18 test. `src/evaluation.py` implementa `IncidentSplit.create/load/validate/save`;
+`python -m scripts.create_incident_split` crea el manifiesto una sola vez o valida
+el existente sin sobrescribirlo. Método cíclico con servicios/fallos permutados,
+una repetición elegida por pareja seleccionada: test tiene 3 casos por fallo y
+3/4 por servicio, conservando al menos 2 repeticiones de cada pareja en desarrollo.
+Selección solo con metadatos; no se consultan métricas ni calidad del detector.
+La huella detecta cambios de IDs/etiquetas, no contenido de métricas.
+El script del detector restringe casos a desarrollo por defecto; `--partition test`
+es exclusivamente para evaluación final. No regenerar la reserva según resultados.
+La implementación de GroupKFold, undersampling y entrenamiento sigue pendiente.
+Esta actualización sustituye las menciones históricas a partición pendiente.
+
+Estado vigente del detector (sustituye las referencias históricas a pendiente):
+`src/window_detector.py` implementa `WindowDetector`, estados WARMUP/NORMAL/
+OBSERVATION/ALERT y actualizaciones/eventos por muestra. JSON y validador incluyen
+warmup_sec=60, anomaly_consecutive_sec=5, recovery_consecutive_sec=5 y
+diagnosis_delay_sec=10. Máximo de segmento 120 s sin recuperar automáticamente.
+`python -m scripts.run_window_detector --incident <case>` permite inspeccionar
+un caso sin etiquetas. DIAGNOSIS_DUE contiene baseline previo a sospecha y
+observaciones hasta el diagnóstico, pero no ejecuta ranking ni modelo.
+El buffer de sospecha retiene como máximo max_anomaly_window_sec muestras;
+conserva por separado el inicio original de la sospecha. Al terminar el archivo,
+se informa diagnóstico/segmento/calentamiento/observación incompletos cuando corresponda.
+Política inicial revisable para faltantes parciales: anomalía observable prevalece;
+salud exige todas las columnas presentes evaluables. UNKNOWN interrumpe ambas
+seguidillas y congela baseline. Opcionales ausentes no participan. Z-score
+bilateral, desviación poblacional, mínimo 2 valores finitos por métrica y cambios
+desde desviación cero con rtol=1e-9/atol=0 considerados anómalos. Estas decisiones
+no están calibradas: faltantes persistentes pueden bloquear recuperación y
+cambios pequeños en métricas constantes pueden producir alertas. Features,
+modelo y partición persistida de 72/18 siguen pendientes. Se verificaron reglas
+con secuencias controladas y ejecución de un caso real, sin medir calidad RCA
+ni ajustar parámetros con los 90 casos. No se añadieron pruebas automatizadas.
+La ejecución de integración de re2ss_carts_cpu_1 disparó ALERT_CONFIRMED en
+1705595523, antes de la inyección registrada 1705596179: existe una falsa alarma
+con los valores iniciales. No presentar el detector como calibrado ni efectivo;
+fijar la partición 72/18 antes de ajustar reglas con datos de desarrollo.
 
 Actualización: se inspeccionaron los 90 casos locales de RE2-SS en
 `data/raw/RCAEval`. Cada uno contiene 1441 timestamps separados por 1 s y
