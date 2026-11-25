@@ -137,6 +137,37 @@ añade herramientas de desarrollo. `time` no requiere instalación.
 Las actualizaciones siguientes están ordenadas de más reciente a más antigua;
 ante discrepancias, prevalece la primera actualización aplicable.
 
+Random Forest implementado en `src/model.py`: ForestParameters carga
+config/random_forest.json y RootCauseForest valida features finitas/sin IDs,
+entrena y devuelve un score de clase 1 por fila preservando índice y esquema.
+Configuración inicial fija: 100 árboles, Gini, bootstrap, max_features=sqrt,
+max_depth=null, min_samples_leaf=1, semilla 42, n_jobs=1; sin búsqueda ni pesos
+adicionales de clases. La imputación/submuestreo pertenecen a la etapa anterior.
+Persistencia local con save/load (pickle de confianza y mismo entorno);
+feature_importances son reducciones de impureza, no evidencia causal.
+`src/model_training.py` y `python -m scripts.train_random_forest` consumen
+prepared_development_folds y entrenan cinco modelos separados, uno por train.
+Validan roles/IDs, partición, estado del imputador y que validación conserve
+IDs, etiquetas y posiciones de origen. Nunca se ajusta imputación con validación.
+Los scores se unen a IDs/y_true solo después de predecir. Salida nueva obligatoria
+en artifacts/random_forest/development (ignorado): modelos, imputadores,
+scores completos por fold y agregados, importancias, auditorías de los 72 casos,
+manifiestos, configuración, versiones y huellas de Parquet consumidos.
+Ejecución local: train 112/104/106/106/106 filas; validación completa
+211/195/196/210/195 = 1.007 scores de 67/72 incidentes. Cuatro casos sin alerta
+confirmada y uno sin diagnóstico asociable permanecen en auditoría. No es un
+resultado de calidad de ranking ni un modelo final: Top-1/Top-3/MRR pendientes.
+Verificación directa: scores finitos en [0,1], positivos correctos, candidatos
+intactos, ningún grupo compartido train/validación, reload de modelos idéntico,
+reentrenamiento reproducible en los cinco folds y rechazo de NaN, orden de
+columnas distinto, IDs en X o predicción antes de fit. No se añadieron pruebas
+automatizadas, no se leyeron métricas de test ni se ejecutó Git.
+load_prepared_samples ahora es pública para reutilizar el contrato de lectura.
+Próxima tarea: ranking por incidente, empates deterministas y Top-1/Top-3/MRR,
+acompañados de cobertura/falsas alertas. La limitación de CV exploratoria por
+selección previa del detector sigue vigente; no se promete causalidad ni
+probabilidad calibrada tras el submuestreo.
+
 Preparación de datos para entrenamiento implementada en `src/data_preparation.py`.
 `python -m scripts.prepare_training_data` consume development_folds y crea
 data/processed/prepared_development_folds (directorio nuevo obligatorio).

@@ -109,7 +109,8 @@ def undersample_training_indices(
     return np.sort(np.concatenate([positives, selected]))
 
 
-def _load_samples(path: Path) -> PreparedSamples:
+def load_prepared_samples(path: Path) -> PreparedSamples:
+    """Cargar X/y/IDs/grupos alineados, antes o después del submuestreo de train."""
     X = pd.read_parquet(path / 'X.parquet')
     y = pd.read_parquet(path / 'y.parquet')['y']
     ids = pd.read_parquet(path / 'identifiers.parquet')
@@ -166,7 +167,7 @@ def prepare_training_folds(
                 or set(calibration['validation_incidents']) != val_ids
                 or calibration.get('metadata_sha256') != split['metadata_sha256']):
             raise ValueError('La calibración no corresponde al train del fold')
-        train, validation = _load_samples(folder / 'train'), _load_samples(folder / 'validation')
+        train, validation = load_prepared_samples(folder / 'train'), load_prepared_samples(folder / 'validation')
         for role, samples, allowed in [('train', train, train_ids), ('validation', validation, val_ids)]:
             manifest = json.loads((folder / role / 'manifest.json').read_text())
             audit = pd.read_csv(folder / role / 'incident_audit.csv')
