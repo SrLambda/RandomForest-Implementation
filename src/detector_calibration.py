@@ -16,9 +16,14 @@ def fit_deviation_floors(
     configuration: TopologyConfig, split_path: str | Path,
     seed: int = 42, quantile: float = .999, margin: float = 2.,
     reference_scale_quantile: float = .05,
+    *, fit_incidents: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    #Ajustar con 48 casos y reservar 24 de desarrollo para comprobación.
-    #Por cada tipo de fallo se reservan 4 casos para validación interna. 
+    """Ajustar tolerancias con un subconjunto explícito de desarrollo.
+
+    Sin fit_incidents conserva el reparto exploratorio 48/24 anterior. Con
+    IDs explícitos solo lee sus métricas y registra el complemento como reserva;
+    no utiliza sus valores para ajustar cuantiles ni escalas de referencia.
+    """
     
     if not 0 < quantile <= 1:
         raise ValueError('El cuantil debe estar entre 0 y 1')
@@ -30,16 +35,22 @@ def fit_deviation_floors(
     metadata = [loader.load_metadata(key) for key in loader.list_incidents()]
     split = IncidentSplit.load(split_path, metadata)
     by_id = {item.incident_id: item for item in metadata}
-    by_fault: dict[str, list[str]] = defaultdict(list)
-    for key in split.development:
-        by_fault[by_id[key].fault_type].append(key)
-    rng = random.Random(seed)
-    validation: list[str] = []
-    for fault in sorted(by_fault):
-        group = sorted(by_fault[fault])
-        rng.shuffle(group)
-        validation.extend(group[:4])
-    fitting = sorted(set(split.development) - set(validation))
+    if fit_incidents is None:
+        by_fault: dict[str, list[str]] = defaultdict(list)
+        for key in split.development:
+            by_fault[by_id[key].fault_type].append(key)
+        rng = random.Random(seed)
+        validation: list[str] = []
+        for fault in sorted(by_fault):
+            group = sorted(by_fault[fault])
+            rng.shuffle(group)
+            validation.extend(group[:4])
+        fitting = sorted(set(split.development) - set(validation))
+    else:
+        fitting = sorted(fit_incidents)
+        if not fitting or len(set(fitting)) != len(fitting) or set(fitting) - set(split.development):
+            raise ValueError('El ajuste requiere incidentes únicos de desarrollo')
+        validation = sorted(set(split.development) - set(fitting))
     deviations: dict[str, list[np.ndarray]] = defaultdict(list)
     reference_scales: dict[str, list[float]] = defaultdict(list)
     warmup = int(configuration.detector_config['warmup_sec'])

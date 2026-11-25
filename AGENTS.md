@@ -137,6 +137,52 @@ añade herramientas de desarrollo. `time` no requiere instalación.
 Las actualizaciones siguientes están ordenadas de más reciente a más antigua;
 ante discrepancias, prevalece la primera actualización aplicable.
 
+Preparación por folds implementada: `src/cross_validation.py` y
+`python -m scripts.prepare_folds [--n-splits 5] [--output <directorio-nuevo>]`.
+GroupKFold determinista sobre los 72 IDs ANTES del detector, incluyendo omisiones;
+cada caso aparece exactamente una vez en validación. No se exige equilibrio por
+tipo de fallo o servicio en estos folds. `fit_deviation_floors` acepta
+`fit_incidents` explícitos; sin ese argumento conserva el comportamiento 48/24.
+Cada fold elimina la calibración global de su configuración inicial, ajusta
+tolerancias exclusivamente con su train y regenera ventanas/features de train
+y validación con esa misma calibración. TopologyConfig.validate_fold_calibration
+exige coincidencia exacta de IDs y huella; la asociación acepta roles del fold
+solo tras esta comprobación. Guardados folds.json, calibraciones, snapshots,
+datasets y auditorías locales en data/processed/development_folds (sin sobrescribir).
+Ejecución de cinco folds: train 57/57/58/58/58 y validación 15/15/14/14/14;
+casos asociados de validación 14/13/13/14/13 = 67/72, 1.007 filas y 3 falsas
+alertas preinyección. No comparar esta cobertura como mejora/retroceso controlado
+frente al 71/72 global: cambia el conjunto usado para ajustar tolerancias.
+Se verificaron manualmente los diez datasets: alineación, 153 features comunes,
+ausencia de infinitos/IDs en X, una causa raíz por caso, sin pares duplicados,
+grupos disjuntos, cobertura de auditorías y ventanas seleccionadas postinyección.
+Se reprodujo la calibración del fold 1 registrando que solo leyó sus 57 train.
+No se leyeron métricas de test, no hay pruebas nuevas ni operaciones Git.
+Este paso prepara datos; NO incluye imputación, undersampling ni modelo.
+Pendientes esos pasos, ranking, integración y test final. La CV sigue siendo
+exploratoria: las reglas del detector fueron elegidas previamente usando
+desarrollo. El ajuste por fold evita compartir tolerancias aprendidas pero no
+elimina esa selección histórica. No afirmar independencia estadística completa.
+
+Implementación vigente de asociación offline (2026-11-25): `src/window_association.py`
+asocia los eventos del detector con los incidentes etiquetados, y
+`python -m scripts.build_dataset` construye el dataset de desarrollo. Por caso,
+selecciona como máximo el primer `DIAGNOSIS_DUE` completo cuyo inicio original
+de sospecha y primera observación sean ambos posteriores o iguales a la
+inyección. La inyección se usa solo para esta asociación y para generar `y`,
+nunca para disparar el detector ni como feature. Conserva todos los servicios
+observados, sin imputar ni submuestrear. `incident_audit.csv`, `window_audit.csv`
+y `event_audit.csv` incluyen omisiones, falsas alertas, diagnósticos adicionales
+e incompletos; la ausencia de una muestra supervisada no se oculta. La salida se
+crea en un directorio nuevo bajo `data/processed/` y guarda X, y, grupos,
+identificadores y snapshots de configuración/partición. Verificación local:
+71/72 casos asociados, 1.067 filas, 153 features, una causa raíz por caso
+asociado, 4 diagnósticos preinyección y 10 diagnósticos adicionales
+postinyección. Es un dataset exploratorio condicionado a ventanas asociables,
+no una evaluación integral ni apta aún para validación independiente: antes de
+GroupKFold hay que recalibrar el detector dentro del train de cada fold y
+regenerar ventanas/features. Los 18 casos de test no se usaron.
+
 Etapa vigente: el usuario decidió posponer el perfeccionamiento del detector y
 continuar con features. No reanudar ajustes de falsas alertas salvo nueva petición.
 `src/feature_builder.py` implementa FeatureBuilder y FeatureBatch(X, identifiers),
@@ -162,10 +208,9 @@ Revisión de los 72 casos: 69 primeras ventanas etiquetables, 2 primeras ventana
 preinyección sin etiqueta y 1 caso sin diagnóstico. No confundir ese 69 con la
 cobertura 71 del detector: puede haber diagnósticos válidos posteriores en casos
 con falsa alerta inicial. Reporte en reports/features/development_validation.*.
-Pendiente definir/implementar la asociación de ventanas al dataset supervisado,
-sin ocultar falsas alertas ni omisiones y manteniendo una muestra por incidente/
-servicio según formulación acordada. No se construyó el dataset completo ni se
-entrenó Random Forest. GroupKFold, undersampling y ranking siguen pendientes.
+La asociación de ventanas y construcción del dataset se documenta en la
+actualización vigente superior. No se entrenó Random Forest. GroupKFold,
+undersampling y ranking siguen pendientes.
 Mantener la obligación de recalibrar detector/tolerancias dentro de train de
 cada fold futuro; los features actuales son exploratorios con el detector vigente.
 Se verificaron directamente esquema común, valores locales/contexto, NaN sin
