@@ -302,3 +302,38 @@ detector ya se exploró en desarrollo, por lo que esta evaluación es explorator
 Los 18 incidentes de test final permanecen reservados. Las gráficas están
 activadas por defecto y usan Matplotlib, incluido en `requirements-dev.txt`.
 Puedes desactivarlas con `PLOT = False`.
+
+### Guardar el bosque final
+
+En la sección de entrenamiento final del notebook, activa `EXPORT_FINAL_FOREST` y ejecuta la celda.
+El ajuste vuelve a preparar los 72 casos de desarrollo con el detector vigente,
+selecciona las columnas finitas y no constantes de todos los casos asociables y
+entrena el bosque de 10 árboles con semilla 42. Usa un `FINAL_OUTPUT` nuevo para
+cada exportación. El destino predeterminado es `artifacts/final_forest/`.
+
+El paquete local incluye `forest.json` con los árboles y su esquema de variables,
+`manifest.json` con los parámetros y versiones, una copia de la topología, la
+calibración del detector, la partición y la auditoría de desarrollo. Para cargar
+el bosque guardado:
+
+```python
+from src.numpy_forest import RandomForest
+
+forest = RandomForest.from_export("artifacts/final_forest/forest.json")
+```
+
+Las predicciones reciben una fila con las variables registradas en el modelo.
+El paquete se genera usando exclusivamente métricas de desarrollo.
+
+### Evaluación de los 18 casos reservados
+
+La sección de evaluación final usa el paquete exportado y guarda el resumen,
+las auditorías y la matriz de confusión en `reports/final_evaluation/`. Con
+`EVALUATE_FINAL_HOLDOUT = False`, la celda muestra el informe existente. Activa
+la bandera solo para generar el informe a partir de un paquete final fijado.
+
+El bosque final puntuó 15 de 18 casos. Entre los puntuados, Top-1 fue 13/15,
+Top-3 fue 14/15 y MRR fue 0,9083. Incluyendo las tres omisiones como cero,
+Top-1 fue 13/18, Top-3 fue 14/18 y MRR fue 0,7569. Se registraron seis falsas
+alertas previas a la inyección en cinco incidentes. Las métricas corresponden
+a la asociación offline de ventanas con los incidentes de RE2-SS.
