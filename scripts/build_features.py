@@ -47,7 +47,7 @@ def main() -> None:
             'selection': 'first_complete_diagnosis_without_using_labels',
             'rows': len(batch.X), 'feature_names': batch.X.columns.tolist(),
             'labeled': labels is not None,
-            'notes': ['Imputación pendiente: ajustar solo en train de cada fold.',
+            'notes': ['El notebook selecciona columnas finitas y no constantes en train.',
                       'No es el dataset completo de entrenamiento; no oculta incidentes sin diagnóstico.'],
         }
         (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
