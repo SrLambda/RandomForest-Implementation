@@ -1,6 +1,5 @@
 # Dependencias directas de ejecución; fijar versiones tras validar el entorno.
 numpy
 pandas
-scikit-learn
 # Lectura de métricas y metadatos en formato Parquet.
 pyarrow

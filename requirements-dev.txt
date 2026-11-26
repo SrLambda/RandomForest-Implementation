@@ -1,6 +1,7 @@
 -r requirements.txt
 jupyterlab
 ipykernel
+matplotlib
 pytest
 # Descarga selectiva del dataset RCAEval.
 huggingface_hub

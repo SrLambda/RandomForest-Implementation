@@ -135,6 +135,7 @@ def build_development_dataset(
     *, fold_train: tuple[str, ...] | None = None,
     fold_validation: tuple[str, ...] | None = None,
     role: str = 'development',
+    data_root: str | Path | None = None,
 ) -> AssociatedDataset:
     """Construir una muestra por (incidente, servicio) solo en desarrollo.
 
@@ -143,7 +144,7 @@ def build_development_dataset(
     train antes de cargar métricas del rol solicitado. No carga métricas de test.
     """
     start = perf_counter()
-    loader = RCAEvalLoader(configuration=configuration)
+    loader = RCAEvalLoader(root=data_root, configuration=configuration)
     metadata = [loader.load_metadata(key) for key in loader.list_incidents()]
     split = IncidentSplit.load(split_path, metadata)
     if role == 'development' and fold_train is None and fold_validation is None:
