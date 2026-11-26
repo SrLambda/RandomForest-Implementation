@@ -36,7 +36,7 @@ class FeatureBatch:
 
     @property
     def groups(self) -> pd.Series:
-        """Grupos para GroupKFold; distintas ventanas nunca separan un incidente."""
+        """Identificadores para agrupar todos los servicios de un incidente."""
         return self.identifiers['incident_id'].rename('incident_id').copy()
 
 

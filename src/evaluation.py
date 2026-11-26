@@ -1,4 +1,4 @@
-"""Reserva persistida por incidente; folds en cross_validation y balanceo pendiente."""
+"""Reserva persistida por incidente para desarrollo y evaluación final."""
 
 from collections import Counter, defaultdict
 from collections.abc import Iterable

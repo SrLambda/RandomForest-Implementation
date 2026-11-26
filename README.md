@@ -14,7 +14,7 @@ locales y señales relativas al resto de servicios.
 - Dataset previsto: [RCAEval](https://github.com/phamquiluan/RCAEval).
 - Modalidad: exclusivamente métricas numéricas de CPU, memoria, latencia,
   red/sockets y errores.
-- Herramientas a utilizar: Python, NumPy, Pandas, scikit-learn y time.
+- Herramientas a utilizar: Python, NumPy, Pandas y time.
 - Entorno: Linux local; Docker opcional para el empaquetado final.
 
 La formulación elegida es clasificación binaria por `(incident_id, service)`:
@@ -46,7 +46,7 @@ Comprobar el intérprete y las dependencias:
 
 ```bash
 python -c "import sys; print(sys.executable)"
-python -c "import numpy, pandas, sklearn, pyarrow, huggingface_hub; print('Dependencias disponibles')"
+python -c "import numpy, pandas, pyarrow, huggingface_hub; print('Dependencias disponibles')"
 ```
 
 El intérprete debe estar dentro de `.venv/`. En nuevas terminales, ejecutar
@@ -70,11 +70,13 @@ src/configuration.py           Lectura y validación de la configuración JSON
 src/ingestion.py               Adaptación de datos y timestamps
 src/window_detector.py         Ventanas NORMAL/ANÓMALA y baseline sano
 src/feature_builder.py         Features locales y relativas por servicio
-src/model.py                   Entrenamiento y puntuaciones del Random Forest
-src/evaluation.py              GroupKFold y submuestreo exclusivo de train
+src/numpy_forest.py            Random Forest propio con NumPy y Pandas
+src/forest_experiment.py       Entrenamiento y validación por incidente
+src/evaluation.py              Reserva de desarrollo y test
 src/metrics.py                 Top-1, Top-3, MRR y tiempos
 scripts/run_pipeline.py        Punto de entrada provisional
-notebooks/Untitled.ipynb       Exploración inicial
+notebooks/ForestExperiments.ipynb  Entrenamiento y evaluación RCA
+notebooks/Untitled.ipynb           Exploración histórica
 tests/                         Contratos de pruebas pendientes
 ```
 
@@ -200,8 +202,7 @@ No hay excepciones por identificador de incidente. `miss_diagnostics.csv`
 incluye rangos, faltantes y calidad de la referencia para revisar las omisiones.
 
 El ajuste sigue abierto: una tolerancia mayor puede ocultar fallos pequeños.
-En la futura validación GroupKFold, cualquier tolerancia aprendida deberá
-ajustarse solo con el train del fold, sin reutilizar globalmente esta calibración.
+El experimento del notebook reutiliza esta calibración de desarrollo.
 
 Se evaluaron además reglas por familia: dirección creciente para latencia y
 margen adicional solo para caídas de sockets, conservando su sensibilidad a
@@ -245,8 +246,8 @@ El comando reutiliza y valida el manifiesto si existe, sin sobrescribirlo ni
 aplicar otra semilla. La huella de metadatos detecta cambios de identidad o
 etiquetas; no verifica el contenido de los archivos de métricas.
 `IncidentSplit.load()` expone `development` y `test` para la futura orquestación.
-GroupKFold se aplicará dentro de desarrollo. Validación/test conservan todos los
-servicios y nunca reciben submuestreo. El caso `re2ss_carts_cpu_1` ya se había
+El experimento separa entrenamiento y validación por incidente dentro de
+desarrollo y conserva los servicios de cada incidente puntuado. El caso `re2ss_carts_cpu_1` ya se había
 inspeccionado antes de reservar test; no se utilizó para ajustar esta selección.
 
 ## Features por servicio
@@ -263,42 +264,41 @@ python -m scripts.build_features --incident re2ss_carts_cpu_1 --labels --output 
 
 Genera `X.parquet`, `identifiers.parquet`, `manifest.json` y, con `--labels`,
 `y.parquet`. El directorio de salida debe ser nuevo. Los IDs y timestamps de
-diagnóstico quedan fuera de X; `incident_id` en identifiers es el grupo para
-GroupKFold. En el ejemplo hay 15 candidatos: una causa raíz y 14 servicios restantes.
+diagnóstico quedan fuera de X; `incident_id` en identifiers es el identificador para agrupar los candidatos del incidente. En el ejemplo hay 15 candidatos: una causa raíz y 14 servicios restantes.
 
 La extracción usa exclusivamente el baseline anterior a la sospecha y las
 observaciones hasta el diagnóstico. Conserva NaN y señala métricas ausentes;
-la imputación deberá ajustarse solo con train. El contexto se calcula con todos
-los candidatos antes de cualquier submuestreo, que seguirá limitado a train.
+el experimento selecciona columnas finitas y no constantes en entrenamiento.
+El contexto se calcula con todos los candidatos observados.
 
 El comando selecciona el primer diagnóstico completo sin mirar las etiquetas.
 El etiquetado offline se rechaza si la ventana comienza antes de la inyección,
 para evitar asignarle una causa raíz futura. La comprobación en desarrollo
 obtuvo 69 primeras ventanas etiquetables, 2 anteriores a la inyección sin
 etiquetar y 1 caso sin diagnóstico completo. Esto no sustituye la cobertura
-del detector. Corresponde al comando por caso; la construcción por folds
-asocia ventanas y conserva las omisiones en sus auditorías.
+del detector. El experimento asocia ventanas y conserva las omisiones en
+su auditoría.
 La revisión está en `reports/features/development_validation.json`.
 
-## Random Forest por fold
+## Entrenamiento y evaluación en Jupyter
 
-Con los folds ya preparados mediante `scripts.prepare_folds` y
-`scripts.prepare_training_data`, ejecutar:
+Desde la raíz del repositorio, con el entorno virtual activo:
 
 ```bash
-python -m scripts.train_random_forest
+python -m jupyter lab notebooks/ForestExperiments.ipynb
 ```
 
-Los parámetros base se cargan desde `config/random_forest.json`. Se entrena un
-bosque por fold usando su train imputado y submuestreado; validación conserva
-todos los servicios. El modelo recibe únicamente features numéricas, sin IDs
-ni etiquetas entre sus entradas. El directorio de salida debe ser nuevo y puede
-indicarse mediante `--output`.
+Ejecuta las celdas en orden. Con `DATA_ROOT = None`, el notebook usa la ruta de
+`config/topology.json`. Por defecto compara 12 y 24 incidentes asignados a
+entrenamiento, con 10 árboles por corrida y los mismos 12 casos de validación
+interna. El bosque construye árboles CART propios con NumPy y Pandas.
 
-La salida local `artifacts/random_forest/development/` incluye modelos por fold,
-imputadores, manifiestos y `validation_scores.parquet`. Las puntuaciones de
-clase 1 permiten ordenar candidatos, pero no son probabilidades calibradas ni
-demuestran causalidad. Las importancias de variables tampoco prueban causalidad.
-Las auditorías conservan los casos sin ventana asociable. Esta ejecución es
-exploratoria en desarrollo; no utiliza el test final ni genera un modelo final
-para producción. El cálculo de Top-1, Top-3 y MRR sigue pendiente.
+El experimento conserva las filas de entrenamiento y selecciona sus variables
+finitas y no constantes. Si algún candidato de validación tiene valores no
+finitos en esas variables, se registra el incidente completo como no puntuable.
+Top-1, Top-3 y MRR se calculan sobre los incidentes puntuados y se acompañan de
+cobertura, falsas alertas previas a la inyección y omisiones. La calibración del
+detector ya se exploró en desarrollo, por lo que esta evaluación es exploratoria.
+Los 18 incidentes de test final permanecen reservados. Las gráficas están
+activadas por defecto y usan Matplotlib, incluido en `requirements-dev.txt`.
+Puedes desactivarlas con `PLOT = False`.

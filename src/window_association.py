@@ -132,31 +132,18 @@ def associate_windows(
 def build_development_dataset(
     configuration: TopologyConfig,
     split_path: str | Path = 'config/incident_split.json',
-    *, fold_train: tuple[str, ...] | None = None,
-    fold_validation: tuple[str, ...] | None = None,
-    role: str = 'development',
+    *,
     data_root: str | Path | None = None,
 ) -> AssociatedDataset:
     """Construir una muestra por (incidente, servicio) solo en desarrollo.
 
-    Por defecto usa la calibración exploratoria vigente. Para un fold, exige
-    ambos conjuntos y comprueba que la calibración corresponde exactamente a
-    train antes de cargar métricas del rol solicitado. No carga métricas de test.
+    Usa la calibración exploratoria vigente y carga métricas solo de desarrollo.
     """
     start = perf_counter()
     loader = RCAEvalLoader(root=data_root, configuration=configuration)
     metadata = [loader.load_metadata(key) for key in loader.list_incidents()]
     split = IncidentSplit.load(split_path, metadata)
-    if role == 'development' and fold_train is None and fold_validation is None:
-        configuration.validate_calibration_split(split.development, split.test, split.metadata_sha256)
-        selected_ids = split.development
-    elif role in ('train', 'validation') and fold_train is not None and fold_validation is not None:
-        configuration.validate_fold_calibration(
-            fold_train, fold_validation, split.development, split.metadata_sha256,
-        )
-        selected_ids = fold_train if role == 'train' else fold_validation
-    else:
-        raise ValueError('Especificar ambos conjuntos del fold y un rol válido')
+    configuration.validate_calibration_split(split.development, split.test, split.metadata_sha256)
     builder = FeatureBuilder(configuration)
     X_parts: list[pd.DataFrame] = []
     id_parts: list[pd.DataFrame] = []
@@ -165,7 +152,7 @@ def build_development_dataset(
     window_parts: list[pd.DataFrame] = []
     event_parts: list[pd.DataFrame] = []
     schema: list[str] | None = None
-    for number, incident_id in enumerate(selected_ids, 1):
+    for number, incident_id in enumerate(split.development, 1):
         info = loader.load_metadata(incident_id)
         observations = loader.load_metrics(incident_id)
         events = (event for update in WindowDetector(configuration).run(observations) for event in update.events)
@@ -207,7 +194,7 @@ def build_development_dataset(
             'supervised_samples': sample_count,
         })
         if number % 12 == 0:
-            print(f'Asociación de desarrollo: {number}/{len(selected_ids)}', flush=True)
+            print(f'Asociación de desarrollo: {number}/{len(split.development)}', flush=True)
     if not X_parts:
         raise ValueError('No se generaron muestras supervisadas; revisar la asociación antes de exportar')
     X = pd.concat(X_parts, ignore_index=True)
@@ -265,7 +252,7 @@ def save_associated_dataset(
             'La asociación usa verdad de referencia offline; no es una regla de producción.',
             'Las omisiones y falsas alertas permanecen en las auditorías, fuera de X.',
             'No presentar ranking condicionado a la asociación como rendimiento integral del sistema.',
-            'Antes de GroupKFold independiente, recalibrar detector solo con train y regenerar ventanas/features.',
+            'La calibración del detector se eligió en desarrollo; el ranking interno es exploratorio.',
             'No se cargaron métricas de test ni se modificó la partición.',
         ],
     }

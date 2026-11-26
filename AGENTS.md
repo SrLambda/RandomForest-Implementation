@@ -17,7 +17,7 @@ la descripción del estado puede quedar desactualizada.
 - Repositorio base: https://github.com/SrLambda/RandomForest-Implementation.
 - Usar exclusivamente métricas numéricas: CPU, memoria, latencia, red/sockets
   y errores. No incorporar logs ni trazas como entradas del modelo en esta etapa.
-- Herramientas: Python, NumPy, Pandas, scikit-learn y biblioteca estándar `time`.
+- Herramientas: Python, NumPy, Pandas y biblioteca estándar `time`.
 - Entorno Linux local, Python 3.11 o superior según el README. Docker es opcional
   para empaquetar al final, no un requisito para iterar.
 
@@ -91,25 +91,15 @@ calibrados experimentalmente. Actualizar JSON y validador al implementar.
 
 ### Validación, balanceo y ranking
 
-- Usar `GroupKFold` agrupado por `incident_id`: un incidente no puede aparecer
-  simultáneamente en train y validación.
-- Dividir primero los folds y aplicar undersampling de la clase mayoritaria
-  (`0`) exclusivamente dentro del train de cada fold.
-- Nunca submuestrear validación/test: puntuar todos sus servicios por incidente.
-- Ajustar transformaciones aprendidas, selección de features e hiperparámetros
-  sin usar validación/test indebidamente. No ajustar decisiones con el test final.
-- Rankear mediante puntuaciones de `predict_proba`; evaluar Top-1, Top-3 y MRR
-  por incidente. El submuestreo puede afectar la calibración: no asumir que las
-  puntuaciones son probabilidades calibradas.
-- Respetar también la separación experimental al ajustar el detector.
-  Reportar incidentes no detectados y falsas alarmas, además del ranking.
-- Reparto acordado: 72 incidentes de desarrollo y 18 de test final. Reservar
-  test antes de calibrar detector, features o modelo; aplicar GroupKFold dentro
-  de desarrollo. Mantener todos los servicios de validación/test sin submuestreo.
-- La selección concreta sigue pendiente: usar semilla fija, persistir los
-  identificadores y procurar equilibrio por servicio causa raíz y tipo de fallo.
-  Hay 5 servicios × 6 fallos × 3 repeticiones: reservar una repetición por cada
-  combinación produciría 30 casos, por lo que no corresponde al reparto 72/18.
+- La evaluación interna usa una partición fija por incidente en
+  `notebooks/ForestExperiments.ipynb`: 12 para validación y conjuntos
+  anidados de 12 y 24 para entrenamiento, con semilla 42 por defecto.
+- Usar el bosque propio de NumPy/Pandas. Seleccionar variables finitas y no
+  constantes solo en train. El experimento no imputa ni submuestrea clases.
+- Puntuar todos los candidatos o auditar el incidente completo como no
+  puntuable. Reportar Top-1, Top-3, MRR, cobertura, omisiones y falsas alertas.
+- Mantener la reserva persistida de 72 casos de desarrollo y 18 de test final.
+  No ajustar decisiones con test ni ejecutar su evaluación sin autorización.
 
 ## Organización del código
 
@@ -122,11 +112,13 @@ documentado y sin lógica principal trasladada al notebook.
 | `src/ingestion.py` | Adaptación de datos, unidades y timestamps |
 | `src/window_detector.py` | Baseline sano y estados de ventanas |
 | `src/feature_builder.py` | Features locales y relativas; muestras y grupos |
-| `src/model.py` | Wrapper de Random Forest, entrenamiento y puntuaciones |
-| `src/evaluation.py` | División por incidentes y submuestreo exclusivo de train |
+| `src/numpy_forest.py` | Bosque propio, entrenamiento y puntuaciones |
+| `src/forest_experiment.py` | Experimento y validación interna por incidente |
+| `src/evaluation.py` | Reserva por incidente de desarrollo y test |
 | `src/metrics.py` | Métricas de ranking y tiempos |
 | `scripts/run_pipeline.py` | Orquestación y punto de entrada |
-| `notebooks/Untitled.ipynb` | Apoyo exploratorio inicial |
+| `notebooks/ForestExperiments.ipynb` | Entrada para entrenamiento y evaluación |
+| `notebooks/Untitled.ipynb` | Apoyo exploratorio histórico |
 | `tests/` | Verificaciones de los contratos y comportamiento |
 
 `requirements.txt` contiene dependencias de ejecución y `requirements-dev.txt`
@@ -137,89 +129,17 @@ añade herramientas de desarrollo. `time` no requiere instalación.
 Las actualizaciones siguientes están ordenadas de más reciente a más antigua;
 ante discrepancias, prevalece la primera actualización aplicable.
 
-Random Forest implementado en `src/model.py`: ForestParameters carga
-config/random_forest.json y RootCauseForest valida features finitas/sin IDs,
-entrena y devuelve un score de clase 1 por fila preservando índice y esquema.
-Configuración inicial fija: 100 árboles, Gini, bootstrap, max_features=sqrt,
-max_depth=null, min_samples_leaf=1, semilla 42, n_jobs=1; sin búsqueda ni pesos
-adicionales de clases. La imputación/submuestreo pertenecen a la etapa anterior.
-Persistencia local con save/load (pickle de confianza y mismo entorno);
-feature_importances son reducciones de impureza, no evidencia causal.
-`src/model_training.py` y `python -m scripts.train_random_forest` consumen
-prepared_development_folds y entrenan cinco modelos separados, uno por train.
-Validan roles/IDs, partición, estado del imputador y que validación conserve
-IDs, etiquetas y posiciones de origen. Nunca se ajusta imputación con validación.
-Los scores se unen a IDs/y_true solo después de predecir. Salida nueva obligatoria
-en artifacts/random_forest/development (ignorado): modelos, imputadores,
-scores completos por fold y agregados, importancias, auditorías de los 72 casos,
-manifiestos, configuración, versiones y huellas de Parquet consumidos.
-Ejecución local: train 112/104/106/106/106 filas; validación completa
-211/195/196/210/195 = 1.007 scores de 67/72 incidentes. Cuatro casos sin alerta
-confirmada y uno sin diagnóstico asociable permanecen en auditoría. No es un
-resultado de calidad de ranking ni un modelo final: Top-1/Top-3/MRR pendientes.
-Verificación directa: scores finitos en [0,1], positivos correctos, candidatos
-intactos, ningún grupo compartido train/validación, reload de modelos idéntico,
-reentrenamiento reproducible en los cinco folds y rechazo de NaN, orden de
-columnas distinto, IDs en X o predicción antes de fit. No se añadieron pruebas
-automatizadas, no se leyeron métricas de test ni se ejecutó Git.
-load_prepared_samples ahora es pública para reutilizar el contrato de lectura.
-Próxima tarea: ranking por incidente, empates deterministas y Top-1/Top-3/MRR,
-acompañados de cobertura/falsas alertas. La limitación de CV exploratoria por
-selección previa del detector sigue vigente; no se promete causalidad ni
-probabilidad calibrada tras el submuestreo.
-
-Preparación de datos para entrenamiento implementada en `src/data_preparation.py`.
-`python -m scripts.prepare_training_data` consume development_folds y crea
-data/processed/prepared_development_folds (directorio nuevo obligatorio).
-Opciones: --source, --output, --negative-ratio (1 por defecto) y --seed (42).
-TrainMedianImputer aprende medianas de TODAS las filas asociadas de train ANTES
-del submuestreo. Columnas completamente NaN en train usan constante 0, registrada
-en imputer.json; este valor no acredita salud ni usa información de validación.
-No cambia el esquema de 153 features ni los indicadores existentes. Transform
-no reajusta valores; el estado JSON puede restaurarse con from_state.
-El submuestreo conserva todos los positivos y elige negativos sin reemplazo,
-reproducible con semilla fija. La proporción indica el máximo de negativos por
-positivo, redondeado hacia arriba; no duplica filas si faltan negativos.
-Validación conserva todas sus filas, servicios, etiquetas y orden, sin balanceo.
-Cada fold exporta X/y/identifiers/groups, source_rows para rastrear posiciones
-en origen, estado del imputador y manifiesto con procedencia/auditorías de origen.
-Se comprueban IDs, partición, calibración train y coherencia con las auditorías.
-Ejecución local de los cinco folds: train 841→112, 782→104, 796→106, 797→106,
-797→106; proporción 1:1. Validación completa 211/195/196/210/195 = 1.007 filas.
-Verificación directa: medianas coinciden exactamente con train original, sin
-NaN/infinitos en salida, etiquetas/IDs alineados, sin repetición de filas,
-positivos conservados y selección reproducible. Comprobados respaldo de columna
-vacía, serialización y proporciones inválidas con fragmentos manuales, sin
-añadir pruebas automatizadas ni tocar Git. No se consultaron métricas de test.
-Siguiente tarea: Random Forest y ranking; la cobertura de validación sigue en
-67/72 y las limitaciones de CV exploratoria descritas abajo permanecen.
-
-Preparación por folds implementada: `src/cross_validation.py` y
-`python -m scripts.prepare_folds [--n-splits 5] [--output <directorio-nuevo>]`.
-GroupKFold determinista sobre los 72 IDs ANTES del detector, incluyendo omisiones;
-cada caso aparece exactamente una vez en validación. No se exige equilibrio por
-tipo de fallo o servicio en estos folds. `fit_deviation_floors` acepta
-`fit_incidents` explícitos; sin ese argumento conserva el comportamiento 48/24.
-Cada fold elimina la calibración global de su configuración inicial, ajusta
-tolerancias exclusivamente con su train y regenera ventanas/features de train
-y validación con esa misma calibración. TopologyConfig.validate_fold_calibration
-exige coincidencia exacta de IDs y huella; la asociación acepta roles del fold
-solo tras esta comprobación. Guardados folds.json, calibraciones, snapshots,
-datasets y auditorías locales en data/processed/development_folds (sin sobrescribir).
-Ejecución de cinco folds: train 57/57/58/58/58 y validación 15/15/14/14/14;
-casos asociados de validación 14/13/13/14/13 = 67/72, 1.007 filas y 3 falsas
-alertas preinyección. No comparar esta cobertura como mejora/retroceso controlado
-frente al 71/72 global: cambia el conjunto usado para ajustar tolerancias.
-Se verificaron manualmente los diez datasets: alineación, 153 features comunes,
-ausencia de infinitos/IDs en X, una causa raíz por caso, sin pares duplicados,
-grupos disjuntos, cobertura de auditorías y ventanas seleccionadas postinyección.
-Se reprodujo la calibración del fold 1 registrando que solo leyó sus 57 train.
-No se leyeron métricas de test, no hay pruebas nuevas ni operaciones Git.
-Este paso prepara datos; NO incluye imputación, undersampling ni modelo.
-Pendientes esos pasos, ranking, integración y test final. La CV sigue siendo
-exploratoria: las reglas del detector fueron elegidas previamente usando
-desarrollo. El ajuste por fold evita compartir tolerancias aprendidas pero no
-elimina esa selección histórica. No afirmar independencia estadística completa.
+Recorrido vigente: `notebooks/ForestExperiments.ipynb`, con `src/forest_experiment.py`,
+`src/numpy_forest.py` y `src/metrics.py`. El usuario eligió retirar los cinco
+folds y el modelo de scikit-learn. Se retiraron sus scripts de preparación y
+entrenamiento, su configuración y sus interfaces específicas. Este acuerdo
+sustituye las referencias históricas a GroupKFold, imputación y undersampling.
+DATA_ROOT=None toma la ruta configurada. Las gráficas están activadas con
+PLOT=True y usan Matplotlib, declarado en requirements-dev.txt. El notebook histórico Untitled se
+conserva como referencia. Los artefactos locales de recorridos antiguos se
+conservan como resultados históricos, y sus modelos pickle requieren el código
+anterior para cargarse. La validación fija es exploratoria por
+la calibración previa del detector en desarrollo. Test final sigue reservado.
 
 Implementación vigente de asociación offline (2026-11-25): `src/window_association.py`
 asocia los eventos del detector con los incidentes etiquetados, y
