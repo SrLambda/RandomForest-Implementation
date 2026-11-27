@@ -129,6 +129,42 @@ añade herramientas de desarrollo. `time` no requiere instalación.
 Las actualizaciones siguientes están ordenadas de más reciente a más antigua;
 ante discrepancias, prevalece la primera actualización aplicable.
 
+Evaluación final ejecutada con el paquete congelado de desarrollo y los 18 IDs
+de la reserva. `src/final_evaluation.py` comparte la asociación offline y el
+ranking vigentes. Reporte local en reports/final_evaluation; el notebook lo
+muestra y mantiene la ejecución de test desactivada por defecto. Cobertura
+15/18, tres sin diagnóstico asociable, seis falsas alertas en cinco casos.
+Top-1 13/15, Top-3 14/15, MRR 0.9083 entre puntuados; tomando omisiones como
+cero: 13/18, 14/18 y 0.7569. README registra el resultado. No ajustar con test.
+
+Integración del ajuste final: la última celda de ForestExperiments usa
+`src/final_training.py` con EXPORT_FINAL_FOREST=True. Ajusta el bosque propio
+con todos los casos asociables de desarrollo y exporta un paquete nuevo en
+artifacts/final_forest, con forest.json, esquema, manifiesto, topología y
+calibración, partición y auditoría de desarrollo. Valida la recarga antes de
+publicar el directorio local. README documenta uso y recarga. Verificación local:
+71 de 72 incidentes aportaron 1.067 filas y 44 variables; se validaron la recarga
+del bosque y de la configuración, el rechazo de un destino existente y que las
+lecturas de métricas se limitaron a desarrollo. El test de 18 casos queda pendiente.
+
+Validación exploratoria de desarrollo cerrada para preparar el modelo final.
+Se conserva RE2-SS y la reserva 72/18. Las corridas de 12 y 24 casos de train
+usaron 10 árboles, semillas 42 y los mismos 12 incidentes de validación, todos
+puntuables. Top-1: 9/12 y 10/12; Top-3: 12/12 en ambas; MRR: 0.8611 y 0.9028.
+En la segunda corrida, re2ss_user_delay_2 quedó segundo y re2ss_payment_loss_1
+tercero, con dos candidatos empatados en cabeza en este último. Hubo cero
+falsas alertas preinyección en esos 12 casos y cuatro en los 72 de desarrollo;
+71/72 casos de desarrollo produjeron una ventana asociable. Se verificó que
+las lecturas de métricas se limitaron a los 72 IDs de desarrollo.
+Base para el ajuste final: 10 árboles, semilla del bosque 42, profundidad
+máxima 8, hoja mínima 2, selección de columnas finitas/no constantes sobre
+todo el desarrollo asociable y calibración del detector vigente. Las 44 columnas
+de estas corridas no se fijan como esquema final: se seleccionarán al ajustar.
+El tamaño 24 corresponde a la comparación exploratoria; el entrenamiento final
+usará todo desarrollo. Falta integrar y guardar ese ajuste antes del test final.
+Se borraron artifacts/random_forest y las cinco carpetas locales de folds de
+data/processed. Se conservaron los datos, la partición y las demás salidas locales.
+
 Recorrido vigente: `notebooks/ForestExperiments.ipynb`, con `src/forest_experiment.py`,
 `src/numpy_forest.py` y `src/metrics.py`. El usuario eligió retirar los cinco
 folds y el modelo de scikit-learn. Se retiraron sus scripts de preparación y
@@ -136,9 +172,7 @@ entrenamiento, su configuración y sus interfaces específicas. Este acuerdo
 sustituye las referencias históricas a GroupKFold, imputación y undersampling.
 DATA_ROOT=None toma la ruta configurada. Las gráficas están activadas con
 PLOT=True y usan Matplotlib, declarado en requirements-dev.txt. El notebook histórico Untitled se
-conserva como referencia. Los artefactos locales de recorridos antiguos se
-conservan como resultados históricos, y sus modelos pickle requieren el código
-anterior para cargarse. La validación fija es exploratoria por
+conserva como referencia. La validación fija es exploratoria por
 la calibración previa del detector en desarrollo. Test final sigue reservado.
 
 Implementación vigente de asociación offline (2026-11-25): `src/window_association.py`

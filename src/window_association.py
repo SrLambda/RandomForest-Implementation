@@ -139,6 +139,21 @@ def build_development_dataset(
 
     Usa la calibración exploratoria vigente y carga métricas solo de desarrollo.
     """
+    return _build_partition(configuration, split_path, data_root=data_root, holdout=False)
+
+
+def build_holdout_dataset(
+    configuration: TopologyConfig, split_path: str | Path, *,
+    data_root: str | Path | None = None,
+) -> AssociatedDataset:
+    """Preparar la reserva final con la calibración ya fijada."""
+    return _build_partition(configuration, split_path, data_root=data_root, holdout=True)
+
+
+def _build_partition(
+    configuration: TopologyConfig, split_path: str | Path, *,
+    data_root: str | Path | None, holdout: bool,
+) -> AssociatedDataset:
     start = perf_counter()
     loader = RCAEvalLoader(root=data_root, configuration=configuration)
     metadata = [loader.load_metadata(key) for key in loader.list_incidents()]
@@ -152,7 +167,8 @@ def build_development_dataset(
     window_parts: list[pd.DataFrame] = []
     event_parts: list[pd.DataFrame] = []
     schema: list[str] | None = None
-    for number, incident_id in enumerate(split.development, 1):
+    incident_ids = split.test if holdout else split.development
+    for number, incident_id in enumerate(incident_ids, 1):
         info = loader.load_metadata(incident_id)
         observations = loader.load_metrics(incident_id)
         events = (event for update in WindowDetector(configuration).run(observations) for event in update.events)
@@ -194,7 +210,15 @@ def build_development_dataset(
             'supervised_samples': sample_count,
         })
         if number % 12 == 0:
-            print(f'Asociación de desarrollo: {number}/{len(split.development)}', flush=True)
+            partition = 'test' if holdout else 'desarrollo'
+            print(f'Asociación de {partition}: {number}/{len(incident_ids)}', flush=True)
+    if not X_parts and holdout:
+        return AssociatedDataset(
+            FeatureBatch(pd.DataFrame(), pd.DataFrame(columns=['incident_id', 'service'])),
+            pd.Series(dtype=int), pd.DataFrame(incident_rows),
+            pd.concat(window_parts, ignore_index=True), pd.concat(event_parts, ignore_index=True),
+            perf_counter() - start,
+        )
     if not X_parts:
         raise ValueError('No se generaron muestras supervisadas; revisar la asociación antes de exportar')
     X = pd.concat(X_parts, ignore_index=True)
